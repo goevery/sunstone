@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dependency Documentation"
+  short_description: "Find reliable dependency documentation and source"
+  default_prompt: "Use $dependency-docs to find reliable documentation for this dependency."

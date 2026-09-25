@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "dependency-docs": {
+      "source": "juanmarin-co/skills",
+      "sourceType": "github",
+      "skillPath": "skills/dependency-docs/SKILL.md",
+      "computedHash": "72c3cb1bd9fed0254db2a454ca723c9a1abdec7d729b4318b605ae85e2ee7278"
+    },
+    "terraform-provider-docs": {
+      "source": "juanmarin-co/skills",
+      "sourceType": "github",
+      "skillPath": "skills/terraform-provider-docs/SKILL.md",
+      "computedHash": "fbb001bae0f677cb5d15604ee6fec6cab013cf5efdc9ce4f5bdfd4dec9682471"
+    }
+  }
+}

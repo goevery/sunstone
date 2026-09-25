@@ -1,0 +1,4 @@
+interface:
+  display_name: "Terraform Provider Documentation"
+  short_description: "Find public Terraform provider documentation"
+  default_prompt: "Use $terraform-provider-docs to find documentation for this Terraform provider."
