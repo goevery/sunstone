@@ -2,7 +2,7 @@
 
 **Deploy containers without deploying an orchestrator.**
 
-Sunstone deploys container images to Google Cloud VMs through explicit, imperative commands and provides zero-downtime deployments for HTTP workloads. The VMs and Google Cloud infrastructure remain yours.
+Sunstone deploys container images directly to Google Cloud VMs and provides zero-downtime deployments for HTTP workloads without requiring a control plane, while the VMs and surrounding infrastructure remain yours.
 
 > Sunstone is under development.
 
