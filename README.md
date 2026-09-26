@@ -2,9 +2,9 @@
 
 **Deploy containers without deploying an orchestrator.**
 
-Orchestrators like Kubernetes solve important problems, but many applications consist of a few stateless services and background workers that fit comfortably on a small number of VMs. For those applications, Kubernetes can cost more to run than the workloads it hosts once infrastructure and the engineering time for upgrades, monitoring, and troubleshooting are counted.
+Orchestrators like Kubernetes solve important problems, but many applications consist of a few stateless services and background workers that fit comfortably on a small number of VMs. For them, Kubernetes can cost more than the workloads it runs, both in infrastructure and in engineering time spent on upgrades, monitoring, and troubleshooting.
 
-Cloud Run shows how simple container deployment can be. Its usage-based pricing keeps early costs low, but well-sized VMs can cost less as an application grows. The usual tradeoff is a return to shell scripts and manual Docker commands.
+Cloud Run shows how simple container deployment can be. Its usage-based pricing keeps early costs low, but well-sized VMs can cost less as an application grows. Running containers on VMs often means falling back to shell scripts and manual Docker commands.
 
 Sunstone deploys container images to Google Cloud VMs and manages deployments through explicit, imperative commands. The VMs and Google Cloud infrastructure remain yours.
 
@@ -12,72 +12,76 @@ Sunstone is built for stateless services and background workers. Cloud providers
 
 > Sunstone is under development.
 
-## Model
+## How Sunstone works
 
-- A config defines one application and one container image.
-- Every workload in the config uses the same image version and deploys or rolls back with the others.
-- A workload with `http` serves requests; one without it is a worker.
-- Each HTTP workload registers its routes with the shared proxy on its hosts.
-- Projects, networks, IAM, and Compute Engine instances are provisioned outside Sunstone.
+Sunstone treats each web service or background worker as a workload. A workload runs one container on one or more VMs and deploys and rolls back independently.
+
+The proxy and other host-level services run separately from application workloads.
+
+For HTTP workloads, Sunstone starts the new container, waits until it is ready, and switches traffic through a shared proxy. You provision projects, networks, IAM, and Compute Engine instances separately.
 
 ## Configuration
 
+One configuration file defines one workload and one container.
+
 ```yaml
-schema: 1
+name: storefront-web
 
-service: storefront
-image: us-central1-docker.pkg.dev/acme-prod/apps/storefront
-
-google:
+gcp:
   project: acme-prod
+  instances:
+    - zone: us-central1-a
+      name: storefront-1
+    - zone: us-central1-b
+      name: storefront-2
 
-workloads:
-  web:
-    instances:
-      - zone: us-central1-a
-        name: storefront-1
-      - zone: us-central1-b
-        name: storefront-2
+container:
+  image: us-central1-docker.pkg.dev/acme-prod/apps/storefront
+  command: ["bin/web"]
 
-    command: ["bin/web"]
+  env:
+    APP_ENV: production
+    DATABASE_URL:
+      secret: projects/acme-prod/secrets/database-url/versions/latest
 
-    http:
+  resources:
+    cpu:
+      shares: 1024
+    memory:
+      limit: 512MiB
+
+  readinessProbe:
+    httpGet:
+      path: /up
       port: 3000
-      healthcheck:
-        path: /up
-      routes:
-        - host: shop.example.com
 
-  worker:
-    instances:
-      - zone: us-central1-a
-        name: storefront-worker-1
-
-    command: ["bin/jobs"]
-
-resources:
-  cpu:
-    shares: 1024
-  memory:
-    limit: 512MiB
-
-env:
-  APP_ENV: production
-  DATABASE_URL:
-    secret: projects/acme-prod/secrets/database-url/versions/latest
-
-deploy:
-  batch: 1
-  wait: 5s
-  timeout: 60s
-  retain: 5
+http:
+  port: 3000
+  routes:
+    - host: shop.example.com
 ```
 
-CPU shares are relative weights used only during contention; they are neither reservations nor caps. Memory limits are hard container limits.
+Sunstone configures CPU and memory differently because they behave differently when containers share a VM. CPU is compressible. A container can receive less CPU and keep running, only more slowly. CPU shares only matter when the VM is busy. Containers with more shares get more CPU. When the VM has spare CPU, any container can use it.
 
-Applications that deploy independently use separate configs. The same applies to workloads that need independent deployment or rollback.
+Memory is incompressible. A container cannot adapt to memory pressure merely by running more slowly. A hard memory limit protects other workloads on the host, and exceeding it can cause an out-of-memory kill.
+
+Web services and background workers use the same configuration format. Here is a worker using that format.
+
+```yaml
+name: storefront-worker
+
+gcp:
+  project: acme-prod
+  instances:
+    - zone: us-central1-a
+      name: storefront-worker-1
+
+container:
+  image: us-central1-docker.pkg.dev/acme-prod/apps/storefront
+  command: ["bin/jobs"]
+```
 
 ## Inspiration
 
-- [Kamal](https://kamal-deploy.org/) for simple, imperative container deployments.
-- [Cloud Run](https://cloud.google.com/run) for its container model and Google Cloud integration, without its declarative resource format.
+- [Kamal](https://kamal-deploy.org/) for its imperative deployment workflow.
+- [Cloud Run](https://cloud.google.com/run) for its container configuration and Google Cloud integration.
