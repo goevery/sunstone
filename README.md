@@ -8,7 +8,7 @@ Sunstone deploys container images directly to Google Cloud VMs and provides zero
 
 ## Why Sunstone
 
-Orchestrators like Kubernetes solve important problems, but many applications consist of a few stateless services and background workers that fit comfortably on a small number of VMs. For them, Kubernetes can cost more than the workloads it runs, both in infrastructure and in engineering time spent on upgrades, monitoring, and troubleshooting.
+Orchestrators like Kubernetes solve important problems, but many applications consist of a few stateless services and background workloads that fit comfortably on a small number of VMs. For them, Kubernetes can cost more than the workloads it runs, both in infrastructure and in engineering time spent on upgrades, monitoring, and troubleshooting.
 
 Cloud Run shows how simple container deployment can be. Its usage-based pricing keeps early costs low, but well-sized VMs can cost less as an application grows. Running containers on VMs often means falling back to shell scripts and manual Docker commands.
 
@@ -16,15 +16,15 @@ Cloud Run shows how simple container deployment can be. Its usage-based pricing 
 
 Sunstone only speaks GCP. Its choices are informed by years of operating applications on the platform. Security defaults are built in, and complexity has to earn its place.
 
-Sunstone is built for stateless services and background workers. Cloud providers already do an excellent job running databases and other stateful systems. We believe durable state is better left to managed services such as Cloud SQL, Memorystore, and Cloud Storage, while Sunstone focuses on replaceable application containers.
+Sunstone is built for stateless services and background workloads. Cloud providers already do an excellent job running databases and other stateful systems. We believe durable state is better left to managed services such as Cloud SQL, Memorystore, and Cloud Storage, while Sunstone focuses on replaceable application containers.
 
 ## How Sunstone works
 
-Sunstone treats each web service or background worker as a workload. A workload runs one container on one or more VMs and is deployed independently. Containers are replaced one VM at a time.
+Sunstone supports HTTP workloads and background workloads. A workload runs one container on one or more VMs and is deployed independently. Containers are replaced one VM at a time.
 
-HTTP workloads use a zero-downtime rolling deployment. The new container starts alongside the current one. Once it is ready, the proxy on that VM sends new requests to it while the old container drains and stops.
+HTTP workloads use a zero-downtime rolling deployment. When deploying a new version of an HTTP workload, Sunstone starts the replacement container alongside the one currently serving traffic. Once the replacement is ready, the proxy on that VM sends new requests to it while the old container drains and stops.
 
-Workers use stop-then-start replacement. The current worker shuts down cleanly before its replacement starts.
+Background workloads use stop-then-start replacement. When deploying a new version of a background workload, Sunstone lets the current container shut down cleanly before starting its replacement.
 
 Sunstone runs one proxy on each VM, shared by the HTTP workloads deployed there. You provision projects, networks, IAM, and Compute Engine instances separately.
 
@@ -73,16 +73,16 @@ Sunstone configures CPU and memory differently because they behave differently w
 
 Memory is incompressible. A container cannot adapt to memory pressure merely by running more slowly. A hard memory limit protects other workloads on the host, and exceeding it can cause an out-of-memory kill.
 
-Web services and background workers use the same configuration format. Here is a worker using that format.
+HTTP workloads and background workloads use the same configuration format. Here is a background workload using that format.
 
 ```yaml
-name: storefront-worker
+name: storefront-jobs
 
 gcp:
   project: acme-prod
   instances:
     - zone: us-central1-a
-      name: storefront-worker-1
+      name: storefront-jobs-1
 
 container:
   image: us-central1-docker.pkg.dev/acme-prod/apps/storefront
