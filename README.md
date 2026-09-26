@@ -8,6 +8,8 @@ Cloud Run shows how simple container deployment can be. Its usage-based pricing 
 
 Sunstone deploys container images to Google Cloud VMs and manages deployments through explicit, imperative commands. The VMs and Google Cloud infrastructure remain yours.
 
+Sunstone only speaks GCP. Its choices are informed by years of operating applications on the platform. Security defaults are built in, and complexity has to earn its place.
+
 Sunstone is built for stateless services and background workers. Cloud providers already do an excellent job running databases and other stateful systems. We believe durable state is better left to managed services such as Cloud SQL, Memorystore, and Cloud Storage, while Sunstone focuses on replaceable application containers.
 
 > Sunstone is under development.
