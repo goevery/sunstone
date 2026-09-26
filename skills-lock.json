@@ -5,13 +5,19 @@
       "source": "juanmarin-co/skills",
       "sourceType": "github",
       "skillPath": "skills/dependency-docs/SKILL.md",
-      "computedHash": "72c3cb1bd9fed0254db2a454ca723c9a1abdec7d729b4318b605ae85e2ee7278"
+      "computedHash": "d3b8a2aaf12cda6743043d401d4f3fcd242748c8c5284d5d365d414ed3c1d778"
+    },
+    "google-cloud-docs": {
+      "source": "juanmarin-co/skills",
+      "sourceType": "github",
+      "skillPath": "skills/google-cloud-docs/SKILL.md",
+      "computedHash": "c4a4d49361a9c308273c5ba6530f481a1ac56ac57d1157b6df6f3b081bf27ba6"
     },
     "terraform-provider-docs": {
       "source": "juanmarin-co/skills",
       "sourceType": "github",
       "skillPath": "skills/terraform-provider-docs/SKILL.md",
-      "computedHash": "fbb001bae0f677cb5d15604ee6fec6cab013cf5efdc9ce4f5bdfd4dec9682471"
+      "computedHash": "4bb51d6ee7dc1768851da745ec48b55b341a7893cbf3c0983c6a5e4dd9c20265"
     }
   }
 }

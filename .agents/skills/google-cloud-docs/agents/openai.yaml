@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google Cloud Documentation"
+  short_description: "Search and retrieve official Google Cloud documentation"
+  default_prompt: "Use $google-cloud-docs to find official Google Cloud documentation."

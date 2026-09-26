@@ -3,8 +3,6 @@ name: dependency-docs
 description: Use when dependency documentation, examples, or source code are needed.
 ---
 
-# Dependency Documentation
-
 ## Documentation Sources
 
 Use these sources in order. Stop when one provides enough information to answer confidently. Otherwise, continue to the next.
