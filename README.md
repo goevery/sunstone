@@ -2,7 +2,7 @@
 
 **Deploy containers without deploying an orchestrator.**
 
-Sunstone deploys container images to Google Cloud VMs and manages deployments through explicit, imperative commands. The VMs and Google Cloud infrastructure remain yours.
+Sunstone deploys container images to Google Cloud VMs through explicit, imperative commands and provides zero-downtime deployments for HTTP workloads. The VMs and Google Cloud infrastructure remain yours.
 
 > Sunstone is under development.
 
@@ -20,11 +20,13 @@ Sunstone is built for stateless services and background workers. Cloud providers
 
 ## How Sunstone works
 
-Sunstone treats each web service or background worker as a workload. A workload runs one container on one or more VMs and deploys and rolls back independently.
+Sunstone treats each web service or background worker as a workload. A workload runs one container on one or more VMs and is deployed independently. Containers are replaced one VM at a time.
 
-The proxy and other host-level services run separately from application workloads.
+HTTP workloads use a zero-downtime rolling deployment. The new container starts alongside the current one. Once it is ready, the proxy on that VM sends new requests to it while the old container drains and stops.
 
-For HTTP workloads, Sunstone starts the new container, waits until it is ready, and switches traffic through a shared proxy. You provision projects, networks, IAM, and Compute Engine instances separately.
+Workers use stop-then-start replacement. The current worker shuts down cleanly before its replacement starts.
+
+Sunstone runs one proxy on each VM, shared by the HTTP workloads deployed there. You provision projects, networks, IAM, and Compute Engine instances separately.
 
 ## Configuration
 
