@@ -20,6 +20,20 @@ Orchestrators like Kubernetes solve important problems. For applications that fi
 
 ![Sunstone architecture](docs/architecture.png)
 
+### What’s in the mix
+
+**Container-Optimized OS (COS)** is Google’s minimal, container-focused operating system for Compute Engine. It includes Docker and containerd, has a read-only verified root filesystem, and removes packages that a container host does not need. Sunstone targets COS to provide one small, predictable host environment instead of supporting arbitrary Linux distributions.
+
+**Private Compute Engine VMs** run without external IP addresses. Application traffic reaches HTTP workloads through Cloud Load Balancing, while deployment traffic reaches the VMs through IAP. This keeps the machines off the public internet and avoids exposing SSH directly. The VPC must provide the required access to Google APIs and outbound services.
+
+**IAP, OS Login, and SSH** each serve a different purpose. [IAP](https://cloud.google.com/iap/docs/using-tcp-forwarding) creates an IAM-controlled tunnel to a VM’s internal address. [OS Login](https://cloud.google.com/compute/docs/oslogin) controls who may log in using Google identities and IAM roles. SSH carries Sunstone’s commands through that tunnel. Together, they avoid public SSH endpoints, bastion hosts, and manually managed SSH keys.
+
+**Sunbeam** runs once on each VM. It routes requests to HTTP workloads, waits for replacements to become ready, switches traffic, and drains old containers. Background workloads run without the proxy.
+
+**Google Cloud services** provide the surrounding capabilities. Artifact Registry stores images, Secret Manager supplies secrets, Cloud Logging receives logs, and managed services such as Cloud SQL, Memorystore, and Cloud Storage hold durable state.
+
+**Terraform or OpenTofu** provisions the VPC, VMs, IAM policies, load balancer, and managed services. CI/CD builds container images and runs Sunstone to deploy them.
+
 A workload runs one container on one or more VMs. Sunstone replaces containers one VM at a time.
 
 For HTTP workloads, the replacement starts alongside the container serving traffic. Sunbeam switches traffic after the replacement is ready, then drains and stops the old container. Background workloads stop cleanly before their replacements start.
