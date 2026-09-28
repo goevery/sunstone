@@ -8,7 +8,9 @@ Sunstone deploys containerized applications directly to Google Cloud VMs without
 
 ## Project structure
 
-Follow `golang-standards/project-layout`, with binaries in `cmd/` and application modules in `internal/modules/`. Each module exposes a small API from its root package and keeps its implementation in a nested `internal/`, preventing sibling modules from importing it. Organize vertical slices under `features/` and external integrations under `adapters/`.
+Follow `golang-standards/project-layout`, with binaries in `cmd/` and application modules in `internal/modules/`. Each module exposes one small interface from its root package and hides its implementation in a nested `internal/` directory, preventing callers and sibling modules from bypassing that interface.
+
+Design modules for depth: keep interfaces small while concentrating meaningful behavior behind them. Organize cohesive behavior under `features/` and place external integrations under `adapters/`. Introduce an internal seam and adapter only when behavior genuinely varies; do not create interfaces or pass-through packages speculatively.
 
 ```text
 .
@@ -22,18 +24,20 @@ Follow `golang-standards/project-layout`, with binaries in `cmd/` and applicatio
 │   ├── gen/                       # generated API code
 │   └── modules/
 │       ├── <module-a>/
-│       │   ├── module.go          # module's public API
+│       │   ├── module.go          # module's public interface
+│       │   ├── module_test.go     # tests through the public interface
 │       │   └── internal/
 │       │       ├── features/
-│       │       │   └── <feature>/ # one vertical slice
+│       │       │   └── <feature>/ # cohesive behavior
 │       │       │       ├── feature.go
-│       │       │       ├── ports.go
-│       │       │       └── feature_test.go
+│       │       │       ├── ports.go        # only when an internal seam is needed
+│       │       │       └── feature_test.go # focused internal tests when useful
 │       │       └── adapters/
 │       │           └── <adapter>/
 │       │               └── adapter.go
 │       └── <module-b>/
 │           ├── module.go
+│           ├── module_test.go
 │           └── internal/
 │               ├── features/
 │               │   └── <feature>/
@@ -42,3 +46,17 @@ Follow `golang-standards/project-layout`, with binaries in `cmd/` and applicatio
 ├── go.mod
 └── go.sum
 ```
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues for `goevery/sunstone`. See `docs/agents/issue-tracker.md`.
+
+### Pull requests
+
+Use the `visual-pr` skill whenever creating or updating a pull request.
+
+### Domain docs
+
+This repository uses a single-context domain documentation layout. See `docs/agents/domain.md`.
