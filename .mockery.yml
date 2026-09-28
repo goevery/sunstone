@@ -1,0 +1,14 @@
+template: matryer
+formatter: goimports
+log-level: warn
+packages:
+  github.com/goevery/sunstone/internal/modules/deployment/internal/features/deploy:
+    config:
+      dir: internal/modules/deployment
+      filename: mocks_test.go
+      pkgname: deployment
+      structname: mock{{.InterfaceName}}
+    interfaces:
+      Loader:
+      Connector:
+      Host:

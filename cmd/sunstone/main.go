@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/goevery/sunstone/internal/modules/deployment"
 	"github.com/urfave/cli/v3"
 )
 
@@ -22,11 +23,7 @@ func newCommand() *cli.Command {
 		UsageText:   "sunstone COMMAND [OPTIONS]",
 		Description: "Deploy and operate container workloads on Google Cloud VMs without a control plane. Each YAML document defines one workload.",
 		Commands: []*cli.Command{
-			workloadCommand(
-				"deploy",
-				"Deploy workloads",
-				"Validate workload definitions and deploy them to their configured VMs. HTTP workloads use zero-downtime rolling deployment. Background workloads use stop-then-start replacement.",
-			),
+			deployCommand(),
 			workloadCommand(
 				"status",
 				"Show workload status",
@@ -42,6 +39,40 @@ func newCommand() *cli.Command {
 				"Remove workloads",
 				"Remove each workload from its configured VMs. HTTP traffic is drained first. VMs and Sunbeam proxies remain running.",
 			),
+		},
+	}
+}
+
+func deployCommand() *cli.Command {
+	return &cli.Command{
+		Name:        "deploy",
+		Usage:       "Deploy a background workload",
+		UsageText:   "sunstone deploy -f FILE --os-login-user EMAIL",
+		Description: "Validate one background workload definition and deploy it to its configured VM.",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:      "filename",
+				Aliases:   []string{"f"},
+				Usage:     "load a workload from `FILE`",
+				Required:  true,
+				TakesFile: true,
+			},
+			&cli.StringFlag{
+				Name:     "os-login-user",
+				Usage:    "authenticate SSH as the OS Login identity `EMAIL`",
+				Required: true,
+			},
+		},
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			module, err := deployment.New(cmd.Writer)
+			if err != nil {
+				return err
+			}
+			_, err = module.Deploy(ctx, deployment.Request{
+				Filename:    cmd.String("filename"),
+				OSLoginUser: cmd.String("os-login-user"),
+			})
+			return err
 		},
 	}
 }

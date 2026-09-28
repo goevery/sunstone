@@ -1,0 +1,247 @@
+package googlehost
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"net"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/goevery/sunstone/internal/modules/deployment/internal/features/deploy"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/client"
+	"golang.org/x/crypto/ssh"
+)
+
+const (
+	managedLabel       = "dev.sunstone.managed"
+	workloadLabel      = "dev.sunstone.workload"
+	configurationLabel = "dev.sunstone.configuration"
+	verificationLimit  = 5 * time.Minute
+	verificationPoll   = time.Second
+	maximumLogBytes    = 64 * 1024
+)
+
+type host struct {
+	docker *client.Client
+	ssh    *ssh.Client
+	tunnel net.Conn
+}
+
+func (h *host) Close() error {
+	return errors.Join(h.docker.Close(), h.ssh.Close(), h.tunnel.Close())
+}
+
+func (h *host) Pull(ctx context.Context, reference string) (deploy.Image, error) {
+	pull, err := h.docker.ImagePull(ctx, reference, client.ImagePullOptions{})
+	if err != nil {
+		return deploy.Image{}, err
+	}
+	defer pull.Close()
+	if err := pull.Wait(ctx); err != nil {
+		return deploy.Image{}, err
+	}
+	inspected, err := h.docker.ImageInspect(ctx, reference)
+	if err != nil {
+		return deploy.Image{}, err
+	}
+	image := deploy.Image{ID: inspected.ID}
+	if inspected.Config != nil {
+		image.DefaultCommand = slices.Clone(inspected.Config.Cmd)
+		image.DefaultEnvironment = slices.Clone(inspected.Config.Env)
+	}
+
+	return image, nil
+}
+
+func (h *host) WorkloadContainers(ctx context.Context, workload string) ([]deploy.Container, error) {
+	filters := make(client.Filters).
+		Add("label", managedLabel+"=true").
+		Add("label", workloadLabel+"="+workload)
+	listed, err := h.docker.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: filters})
+	if err != nil {
+		return nil, err
+	}
+	containers := make([]deploy.Container, 0, len(listed.Items))
+	for _, item := range listed.Items {
+		name := ""
+		if len(item.Names) != 0 {
+			name = strings.TrimPrefix(item.Names[0], "/")
+		}
+		healthy := item.State == container.StateRunning
+		if item.Health != nil {
+			healthy = string(item.Health.Status) == "healthy"
+		}
+		containers = append(containers, deploy.Container{
+			ID:      item.ID,
+			Name:    name,
+			Running: item.State == container.StateRunning,
+			Healthy: healthy,
+		})
+	}
+
+	return containers, nil
+}
+
+func (h *host) Matches(ctx context.Context, current deploy.Container, desired deploy.ContainerSpec) (bool, error) {
+	inspected, err := h.docker.ContainerInspect(ctx, current.ID, client.ContainerInspectOptions{})
+	if err != nil {
+		return false, err
+	}
+	if inspected.Container.Config == nil || inspected.Container.HostConfig == nil {
+		return false, errors.New("container has incomplete configuration")
+	}
+	expectedCommand := desired.Command
+	if expectedCommand == nil {
+		expectedCommand = desired.Image.DefaultCommand
+	}
+	expectedEnvironment := environmentMap(desired.Image.DefaultEnvironment)
+	maps.Copy(expectedEnvironment, desired.Environment)
+	actualEnvironment := environmentMap(inspected.Container.Config.Env)
+
+	return inspected.Container.Image == desired.Image.ID &&
+		slices.Equal(inspected.Container.Config.Cmd, expectedCommand) &&
+		maps.Equal(actualEnvironment, expectedEnvironment) &&
+		string(inspected.Container.HostConfig.RestartPolicy.Name) == desired.RestartPolicy, nil
+}
+
+func (h *host) Create(ctx context.Context, spec deploy.ContainerSpec) (deploy.Container, error) {
+	fingerprint, err := configurationFingerprint(spec)
+	if err != nil {
+		return deploy.Container{}, err
+	}
+	suffix := make([]byte, 4)
+	if _, err := rand.Read(suffix); err != nil {
+		return deploy.Container{}, fmt.Errorf("generate container name: %w", err)
+	}
+	name := fmt.Sprintf("%s-%s-%s", spec.Name, fingerprint[:12], hex.EncodeToString(suffix))
+	environment := make([]string, 0, len(spec.Environment))
+	for key, value := range spec.Environment {
+		environment = append(environment, key+"="+value)
+	}
+	slices.Sort(environment)
+	created, err := h.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name: name,
+		Config: &container.Config{
+			Image: spec.Image.ID,
+			Cmd:   spec.Command,
+			Env:   environment,
+			Labels: map[string]string{
+				managedLabel:       "true",
+				workloadLabel:      spec.Workload,
+				configurationLabel: fingerprint,
+			},
+		},
+		HostConfig: &container.HostConfig{
+			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(spec.RestartPolicy)},
+		},
+	})
+	if err != nil {
+		return deploy.Container{}, err
+	}
+
+	return deploy.Container{ID: created.ID, Name: name}, nil
+}
+
+func (h *host) Start(ctx context.Context, target deploy.Container) error {
+	_, err := h.docker.ContainerStart(ctx, target.ID, client.ContainerStartOptions{})
+	return err
+}
+
+func (h *host) Stop(ctx context.Context, target deploy.Container) error {
+	_, err := h.docker.ContainerStop(ctx, target.ID, client.ContainerStopOptions{})
+	return err
+}
+
+func (h *host) Verify(ctx context.Context, target deploy.Container) error {
+	ctx, cancel := context.WithTimeout(ctx, verificationLimit)
+	defer cancel()
+
+	for {
+		inspected, err := h.docker.ContainerInspect(ctx, target.ID, client.ContainerInspectOptions{})
+		if err != nil {
+			return err
+		}
+		state := inspected.Container.State
+		if state == nil || !state.Running {
+			if state == nil {
+				return errors.New("container has no reported state")
+			}
+
+			return fmt.Errorf("container is %s with exit code %d", state.Status, state.ExitCode)
+		}
+		if state.Health == nil || string(state.Health.Status) == "healthy" {
+			return nil
+		}
+		if string(state.Health.Status) == "unhealthy" {
+			return errors.New("container health check reported unhealthy")
+		}
+
+		timer := time.NewTimer(verificationPoll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("wait for container health: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+
+func (h *host) Logs(ctx context.Context, target deploy.Container) (string, error) {
+	logs, err := h.docker.ContainerLogs(ctx, target.ID, client.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Tail:       "100",
+	})
+	if err != nil {
+		return "", err
+	}
+	defer logs.Close()
+
+	var output bytes.Buffer
+	limited := io.LimitReader(logs, maximumLogBytes)
+	if _, err := stdcopy.StdCopy(&output, &output, limited); err != nil {
+		return "", err
+	}
+
+	return output.String(), nil
+}
+
+func (h *host) Remove(ctx context.Context, target deploy.Container) error {
+	_, err := h.docker.ContainerRemove(ctx, target.ID, client.ContainerRemoveOptions{Force: true})
+	return err
+}
+
+func configurationFingerprint(spec deploy.ContainerSpec) (string, error) {
+	encoded, err := json.Marshal(struct {
+		Image         string
+		Command       []string
+		Environment   map[string]string
+		RestartPolicy string
+	}{spec.Image.ID, spec.Command, spec.Environment, spec.RestartPolicy})
+	if err != nil {
+		return "", fmt.Errorf("encode container configuration: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func environmentMap(environment []string) map[string]string {
+	result := make(map[string]string, len(environment))
+	for _, entry := range environment {
+		key, value, _ := strings.Cut(entry, "=")
+		result[key] = value
+	}
+
+	return result
+}
