@@ -8,4 +8,3 @@ all: docs/architecture.png
 
 docs/architecture.png: $(D2_SOURCES)
 	$(GO) tool d2 docs/architecture.d2 $@
-	chmod 644 $@
