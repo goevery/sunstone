@@ -2,31 +2,51 @@
 
 **Deploy containers without deploying an orchestrator.**
 
-Sunstone deploys container images directly to Google Cloud VMs and provides zero-downtime deployments for HTTP workloads without requiring a control plane, while the VMs and surrounding infrastructure remain yours.
+Sunstone deploys container images directly to Google Cloud VMs while the machines and surrounding infrastructure remain yours.
 
 > Sunstone is under development.
 
-## Why Sunstone
+## Principles
 
-Orchestrators like Kubernetes solve important problems, but many applications consist of a few stateless services and background workloads that fit comfortably on a small number of VMs. For them, Kubernetes can cost more than the workloads it runs, both in infrastructure and in engineering time spent on upgrades, monitoring, and troubleshooting.
+Orchestrators like Kubernetes solve important problems. For applications that fit comfortably on a few VMs, Sunstone follows a simpler path.
 
-Cloud Run shows how simple container deployment can be. Its usage-based pricing keeps early costs low, but well-sized VMs can cost less as an application grows. Running containers on VMs often means falling back to shell scripts and manual Docker commands.
-
-## Where it fits
-
-Sunstone only speaks GCP. Its choices are informed by years of operating applications on the platform. Security defaults are built in, and complexity has to earn its place.
-
-Sunstone is built for stateless services and background workloads. Cloud providers already do an excellent job running databases and other stateful systems. We believe durable state is better left to managed services such as Cloud SQL, Memorystore, and Cloud Storage, while Sunstone focuses on replaceable application containers.
+1. **Pay for workloads, not orchestration.** A few well-sized VMs can take an application far.
+2. **Zero downtime for HTTP workloads.** Sunstone switches traffic only after the replacement is ready.
+3. **Security comes first.** Sunstone only speaks GCP and uses its security model to make good practices part of every deployment.
+4. **Keep deployment direct.** Sunstone talks to machines without a control plane in between.
+5. **Leave state to managed services.** Databases and durable data deserve systems built to protect them.
 
 ## How Sunstone works
 
-Sunstone supports HTTP workloads and background workloads. A workload runs one container on one or more VMs and is deployed independently. Containers are replaced one VM at a time.
+```mermaid
+flowchart LR
+    Operator[Developer or CI] --> Suns[suns]
+    Suns -->|IAP + OS Login + SSH| Runtime
 
-HTTP workloads use a zero-downtime rolling deployment. When deploying a new version of an HTTP workload, Sunstone starts the replacement container alongside the one currently serving traffic. Once the replacement is ready, the proxy on that VM sends new requests to it while the old container drains and stops.
+    Build[Image build] --> Registry[Artifact Registry]
+    Registry --> Runtime
 
-Background workloads use stop-then-start replacement. When deploying a new version of a background workload, Sunstone lets the current container shut down cleanly before starting its replacement.
+    Internet --> LB[Cloud Load Balancer]
+    LB --> Proxy
 
-Sunstone runs one proxy on each VM, shared by the HTTP workloads deployed there. You provision projects, networks, IAM, and Compute Engine instances separately.
+    subgraph VMs[Private Compute Engine VMs]
+        Runtime[Container-Optimized OS + Docker]
+        Runtime --- Proxy[One Sunstone proxy per VM]
+        Proxy --> HTTP[HTTP workloads]
+        Runtime --> Background[Background workloads]
+    end
+
+    HTTP --> Services[Secret Manager and managed data]
+    Background --> Services
+    HTTP --> Logs[Cloud Logging]
+    Background --> Logs
+```
+
+A workload runs one container on one or more VMs. Sunstone replaces containers one VM at a time.
+
+For HTTP workloads, the replacement starts alongside the container serving traffic. The proxy switches traffic after the replacement is ready, then drains and stops the old container. Background workloads stop cleanly before their replacements start.
+
+You provision projects, networks, IAM, VMs, and load balancers separately.
 
 ## Commands
 
