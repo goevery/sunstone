@@ -20,31 +20,44 @@ Orchestrators like Kubernetes solve important problems. For applications that fi
 
 ```mermaid
 flowchart LR
-    Operator[Developer or CI] --> Suns[suns]
-    Suns -->|IAP + OS Login + SSH| Runtime
-
+    Operator[Developer or CI] --> Sunstone["sunstone<br/>Deployment CLI"]
     Build[Image build] --> Registry[Artifact Registry]
-    Registry --> Runtime
-
     Internet --> LB[Cloud Load Balancer]
-    LB --> Proxy
 
-    subgraph VMs[Private Compute Engine VMs]
-        Runtime[Container-Optimized OS + Docker]
-        Runtime --- Proxy[One Sunstone proxy per VM]
-        Proxy --> HTTP[HTTP workloads]
-        Runtime --> Background[Background workloads]
+    Sunstone -->|IAP + OS Login + SSH| Runtime1
+    Sunstone -->|IAP + OS Login + SSH| Runtime2
+    Registry --> Runtime1
+    Registry --> Runtime2
+    LB --> Proxy1
+    LB --> Proxy2
+
+    subgraph VM1[Private Compute Engine VM]
+        Runtime1[Container-Optimized OS + Docker]
+        Runtime1 --- Proxy1[Sunbeam proxy]
+        Proxy1 --> HTTP1[HTTP workloads]
+        Runtime1 --> Background1[Background workloads]
     end
 
-    HTTP --> Services[Secret Manager and managed data]
-    Background --> Services
-    HTTP --> Logs[Cloud Logging]
-    Background --> Logs
+    subgraph VM2[Private Compute Engine VM]
+        Runtime2[Container-Optimized OS + Docker]
+        Runtime2 --- Proxy2[Sunbeam proxy]
+        Proxy2 --> HTTP2[HTTP workloads]
+        Runtime2 --> Background2[Background workloads]
+    end
+
+    HTTP1 --> Services[Secret Manager and managed data]
+    HTTP2 --> Services
+    Background1 --> Services
+    Background2 --> Services
+    HTTP1 --> Logs[Cloud Logging]
+    HTTP2 --> Logs
+    Background1 --> Logs
+    Background2 --> Logs
 ```
 
 A workload runs one container on one or more VMs. Sunstone replaces containers one VM at a time.
 
-For HTTP workloads, the replacement starts alongside the container serving traffic. The proxy switches traffic after the replacement is ready, then drains and stops the old container. Background workloads stop cleanly before their replacements start.
+For HTTP workloads, the replacement starts alongside the container serving traffic. Sunbeam switches traffic after the replacement is ready, then drains and stops the old container. Background workloads stop cleanly before their replacements start.
 
 You provision projects, networks, IAM, VMs, and load balancers separately.
 
@@ -53,18 +66,18 @@ You provision projects, networks, IAM, VMs, and load balancers separately.
 Use `-f` to pass a workload file or directory.
 
 ```text
-suns deploy  -f FILE_OR_DIRECTORY
-suns status  -f FILE_OR_DIRECTORY
-suns restart -f FILE_OR_DIRECTORY
-suns remove  -f FILE_OR_DIRECTORY
+sunstone deploy  -f FILE_OR_DIRECTORY
+sunstone status  -f FILE_OR_DIRECTORY
+sunstone restart -f FILE_OR_DIRECTORY
+sunstone remove  -f FILE_OR_DIRECTORY
 ```
 
 - `deploy` validates and deploys the workload.
 - `status` reports its state on each VM.
 - `restart` restarts it one VM at a time.
-- `remove` drains traffic and removes it while leaving the VMs and proxy running.
+- `remove` drains traffic and removes it while leaving the VMs and Sunbeam running.
 
-Run `suns COMMAND --help` for complete usage and options.
+Run `sunstone COMMAND --help` for complete usage and options.
 
 ## Configuration
 

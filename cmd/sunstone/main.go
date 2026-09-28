@@ -17,9 +17,9 @@ func main() {
 
 func newCommand() *cli.Command {
 	return &cli.Command{
-		Name:        "suns",
+		Name:        "sunstone",
 		Usage:       "Deploy containers to Google Cloud VMs",
-		UsageText:   "suns COMMAND [OPTIONS]",
+		UsageText:   "sunstone COMMAND [OPTIONS]",
 		Description: "Deploy and operate container workloads on Google Cloud VMs without a control plane. Each YAML document defines one workload.",
 		Commands: []*cli.Command{
 			workloadCommand(
@@ -40,7 +40,7 @@ func newCommand() *cli.Command {
 			workloadCommand(
 				"remove",
 				"Remove workloads",
-				"Remove each workload from its configured VMs. HTTP traffic is drained first. VMs and proxies remain running.",
+				"Remove each workload from its configured VMs. HTTP traffic is drained first. VMs and Sunbeam proxies remain running.",
 			),
 		},
 	}
@@ -50,7 +50,7 @@ func workloadCommand(name, usage, description string) *cli.Command {
 	return &cli.Command{
 		Name:        name,
 		Usage:       usage,
-		UsageText:   fmt.Sprintf("suns %s -f FILE_OR_DIRECTORY [-f FILE_OR_DIRECTORY ...]", name),
+		UsageText:   fmt.Sprintf("sunstone %s -f FILE_OR_DIRECTORY [-f FILE_OR_DIRECTORY ...]", name),
 		Description: description,
 		Flags: []cli.Flag{
 			&cli.StringSliceFlag{
