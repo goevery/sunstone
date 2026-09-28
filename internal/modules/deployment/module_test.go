@@ -38,8 +38,8 @@ func TestDeploysBackgroundWorkload(t *testing.T) {
 	module := moduleWith(t, backgroundWorkload(), host)
 
 	result, err := module.Deploy(context.Background(), Request{
-		Filename:    "workload.yaml",
-		OSLoginUser: "operator@example.com",
+		Filename:                  "workload.yaml",
+		ImpersonateServiceAccount: "operator@example.com",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestCurrentBackgroundWorkloadIsNotReplaced(t *testing.T) {
 	}
 	module := moduleWith(t, backgroundWorkload(), host)
 
-	result, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", OSLoginUser: "operator@example.com"})
+	result, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", ImpersonateServiceAccount: "operator@example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestChangedBackgroundWorkloadStopsBeforeStartingReplacement(t *testing.T) {
 	}
 	module := moduleWith(t, backgroundWorkload(), host)
 
-	result, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", OSLoginUser: "operator@example.com"})
+	result, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", ImpersonateServiceAccount: "operator@example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestFailedReplacementRestartsPreviousRunningContainer(t *testing.T) {
 	}
 	module := moduleWith(t, backgroundWorkload(), host)
 
-	_, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", OSLoginUser: "operator@example.com"})
+	_, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", ImpersonateServiceAccount: "operator@example.com"})
 	if err == nil || !strings.Contains(err.Error(), "replacement logs:\ncrash") {
 		t.Fatalf("expected failed replacement diagnostics, got %v", err)
 	}
@@ -206,7 +206,7 @@ func TestFailedReplacementDoesNotRestartPreviouslyCrashedContainer(t *testing.T)
 	}
 	module := moduleWith(t, backgroundWorkload(), host)
 
-	_, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", OSLoginUser: "operator@example.com"})
+	_, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", ImpersonateServiceAccount: "operator@example.com"})
 	if err == nil {
 		t.Fatal("expected failed replacement")
 	}
@@ -219,7 +219,12 @@ func moduleWith(t *testing.T, workload deploy.Workload, host deploy.Host) Module
 		LoadFunc: func(string) (deploy.Workload, error) { return workload, nil },
 	}
 	connector := &mockConnector{
-		ConnectFunc: func(context.Context, deploy.Target, string) (deploy.Host, error) { return host, nil },
+		ConnectFunc: func(_ context.Context, _ deploy.Target, serviceAccount string) (deploy.Host, error) {
+			if serviceAccount != "operator@example.com" {
+				t.Errorf("impersonated service account = %q", serviceAccount)
+			}
+			return host, nil
+		},
 	}
 
 	return newModule(loader, connector, io.Discard)

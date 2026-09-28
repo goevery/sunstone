@@ -47,7 +47,7 @@ func deployCommand() *cli.Command {
 	return &cli.Command{
 		Name:        "deploy",
 		Usage:       "Deploy a background workload",
-		UsageText:   "sunstone deploy -f FILE --os-login-user EMAIL",
+		UsageText:   "sunstone deploy -f FILE --impersonate-service-account EMAIL",
 		Description: "Validate one background workload definition and deploy it to its configured VM.",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -58,8 +58,8 @@ func deployCommand() *cli.Command {
 				TakesFile: true,
 			},
 			&cli.StringFlag{
-				Name:     "os-login-user",
-				Usage:    "authenticate SSH as the OS Login identity `EMAIL`",
+				Name:     "impersonate-service-account",
+				Usage:    "deploy as the service account `EMAIL`",
 				Required: true,
 			},
 		},
@@ -69,8 +69,8 @@ func deployCommand() *cli.Command {
 				return err
 			}
 			_, err = module.Deploy(ctx, deployment.Request{
-				Filename:    cmd.String("filename"),
-				OSLoginUser: cmd.String("os-login-user"),
+				Filename:                  cmd.String("filename"),
+				ImpersonateServiceAccount: cmd.String("impersonate-service-account"),
 			})
 			return err
 		},

@@ -20,8 +20,8 @@ import (
 	"github.com/moby/moby/client"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/impersonate"
 	"google.golang.org/api/option"
 )
 
@@ -43,10 +43,13 @@ func New() (*Adapter, error) {
 }
 
 // Connect opens a Docker API client through an authenticated SSH connection.
-func (a *Adapter) Connect(ctx context.Context, target deploy.Target, osLoginUser string) (deploy.Host, error) {
-	tokenSource, err := google.DefaultTokenSource(ctx, compute.CloudPlatformScope)
+func (a *Adapter) Connect(ctx context.Context, target deploy.Target, serviceAccount string) (deploy.Host, error) {
+	tokenSource, err := impersonate.CredentialsTokenSource(ctx, impersonate.CredentialsConfig{
+		TargetPrincipal: serviceAccount,
+		Scopes:          []string{compute.CloudPlatformScope},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("load application default credentials: %w", err)
+		return nil, fmt.Errorf("impersonate service account %s: %w", serviceAccount, err)
 	}
 	signer, err := generateKey()
 	if err != nil {
@@ -64,7 +67,7 @@ func (a *Adapter) Connect(ctx context.Context, target deploy.Target, osLoginUser
 		return nil, errors.New("Compute Engine returned an empty VM instance ID")
 	}
 
-	username, err := importLoginKey(ctx, tokenSource, signer, target.Project, osLoginUser)
+	username, err := importLoginKey(ctx, tokenSource, signer, target.Project, serviceAccount)
 	if err != nil {
 		return nil, err
 	}

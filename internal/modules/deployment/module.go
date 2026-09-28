@@ -14,10 +14,10 @@ type Module interface {
 	Deploy(context.Context, Request) (Result, error)
 }
 
-// Request selects a workload definition and the OS Login deployment identity.
+// Request selects a workload definition and the service account used to deploy it.
 type Request struct {
-	Filename    string
-	OSLoginUser string
+	Filename                  string
+	ImpersonateServiceAccount string
 }
 
 // Result describes the observable outcome of a deployment.
@@ -47,6 +47,6 @@ func newModule(loader deploy.Loader, connector deploy.Connector, progress io.Wri
 }
 
 func (m *module) Deploy(ctx context.Context, request Request) (Result, error) {
-	result, err := m.feature.Deploy(ctx, request.Filename, request.OSLoginUser)
+	result, err := m.feature.Deploy(ctx, request.Filename, request.ImpersonateServiceAccount)
 	return Result(result), err
 }

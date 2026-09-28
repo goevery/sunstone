@@ -30,13 +30,13 @@ func New(loader Loader, connector Connector, progress io.Writer) *Feature {
 }
 
 // Deploy loads and deploys the workload in filename.
-func (f *Feature) Deploy(ctx context.Context, filename, osLoginUser string) (Result, error) {
+func (f *Feature) Deploy(ctx context.Context, filename, serviceAccount string) (Result, error) {
 	workload, err := f.loader.Load(filename)
 	if err != nil {
 		return Result{}, err
 	}
-	if osLoginUser == "" {
-		return Result{}, errors.New("OS Login user is required")
+	if serviceAccount == "" {
+		return Result{}, errors.New("service account to impersonate is required")
 	}
 
 	target := Target{
@@ -45,7 +45,7 @@ func (f *Feature) Deploy(ctx context.Context, filename, osLoginUser string) (Res
 		Instance: workload.GCP.Instances[0].Name,
 	}
 	fmt.Fprintf(f.progress, "%s / %s: connecting\n", workload.Name, target.Instance)
-	host, err := f.connector.Connect(ctx, target, osLoginUser)
+	host, err := f.connector.Connect(ctx, target, serviceAccount)
 	if err != nil {
 		return Result{}, fmt.Errorf("connect to %s: %w", target.Instance, err)
 	}
