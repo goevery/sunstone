@@ -18,7 +18,7 @@ Orchestrators like Kubernetes solve important problems. For applications that fi
 
 ## How Sunstone works
 
-![Sunstone architecture](docs/architecture.png)
+![Sunstone architecture](docs/diagrams/architecture.png)
 
 ### What’s in the mix
 
