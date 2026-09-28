@@ -12,7 +12,7 @@ Orchestrators like Kubernetes solve important problems. For applications that fi
 
 1. **Pay for workloads, not orchestration.** A few well-sized VMs can take an application far.
 2. **Zero downtime for HTTP workloads.** Sunstone switches traffic only after the replacement is ready.
-3. **Security comes first.** Sunstone only speaks GCP and uses its security model to make good practices part of every deployment.
+3. **Security comes first.** Sunstone builds on GCP’s security model to make good practices part of every deployment.
 4. **Keep deployment direct.** Sunstone talks to machines without a control plane in between.
 5. **Leave state to managed services.** Databases and durable data deserve systems built to protect them.
 
@@ -45,14 +45,12 @@ flowchart LR
         Runtime2 --> Background2[Background workloads]
     end
 
-    HTTP1 --> Services[Secret Manager and managed data]
-    HTTP2 --> Services
-    Background1 --> Services
-    Background2 --> Services
-    HTTP1 --> Logs[Cloud Logging]
-    HTTP2 --> Logs
-    Background1 --> Logs
-    Background2 --> Logs
+    Runtime1 --> Secrets[Secret Manager]
+    Runtime2 --> Secrets
+    Runtime1 --> State["Managed state<br/>Cloud SQL · Memorystore · Cloud Storage"]
+    Runtime2 --> State
+    Runtime1 --> Logs[Cloud Logging]
+    Runtime2 --> Logs
 ```
 
 A workload runs one container on one or more VMs. Sunstone replaces containers one VM at a time.
