@@ -28,9 +28,27 @@ Background workloads use stop-then-start replacement. When deploying a new versi
 
 Sunstone runs one proxy on each VM, shared by the HTTP workloads deployed there. You provision projects, networks, IAM, and Compute Engine instances separately.
 
+## Commands
+
+Use `-f` to pass a workload file or directory.
+
+```text
+suns deploy  -f FILE_OR_DIRECTORY
+suns status  -f FILE_OR_DIRECTORY
+suns restart -f FILE_OR_DIRECTORY
+suns remove  -f FILE_OR_DIRECTORY
+```
+
+- `deploy` validates and deploys the workload.
+- `status` reports its state on each VM.
+- `restart` restarts it one VM at a time.
+- `remove` drains traffic and removes it while leaving the VMs and proxy running.
+
+Run `suns COMMAND --help` for complete usage and options.
+
 ## Configuration
 
-One configuration file defines one workload and one container.
+Each YAML document defines one workload and one container.
 
 ```yaml
 name: storefront-web
@@ -92,4 +110,5 @@ container:
 ## Inspiration
 
 - [Kamal](https://kamal-deploy.org/) for its imperative deployment workflow.
+- [Knative](https://knative.dev/) for its workload and traffic model.
 - [Cloud Run](https://cloud.google.com/run) for its container configuration and Google Cloud integration.
