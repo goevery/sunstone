@@ -18,40 +18,7 @@ Orchestrators like Kubernetes solve important problems. For applications that fi
 
 ## How Sunstone works
 
-```mermaid
-flowchart LR
-    Operator[Developer or CI] --> Sunstone["sunstone<br/>Deployment CLI"]
-    Build[Image build] --> Registry[Artifact Registry]
-    Internet --> LB[Cloud Load Balancer]
-
-    Sunstone -->|IAP + OS Login + SSH| Runtime1
-    Sunstone -->|IAP + OS Login + SSH| Runtime2
-    Registry --> Runtime1
-    Registry --> Runtime2
-    LB --> Proxy1
-    LB --> Proxy2
-
-    subgraph VM1[Private Compute Engine VM]
-        Runtime1[Container-Optimized OS + Docker]
-        Runtime1 --- Proxy1[Sunbeam proxy]
-        Proxy1 --> HTTP1[HTTP workloads]
-        Runtime1 --> Background1[Background workloads]
-    end
-
-    subgraph VM2[Private Compute Engine VM]
-        Runtime2[Container-Optimized OS + Docker]
-        Runtime2 --- Proxy2[Sunbeam proxy]
-        Proxy2 --> HTTP2[HTTP workloads]
-        Runtime2 --> Background2[Background workloads]
-    end
-
-    Runtime1 --> Secrets[Secret Manager]
-    Runtime2 --> Secrets
-    Runtime1 --> State["Managed state<br/>Cloud SQL · Memorystore · Cloud Storage"]
-    Runtime2 --> State
-    Runtime1 --> Logs[Cloud Logging]
-    Runtime2 --> Logs
-```
+![Sunstone architecture](docs/architecture.svg)
 
 A workload runs one container on one or more VMs. Sunstone replaces containers one VM at a time.
 

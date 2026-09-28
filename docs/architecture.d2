@@ -1,0 +1,214 @@
+vars: {
+  d2-config: {
+    layout-engine: elk
+    theme-id: 1
+    pad: 24
+  }
+}
+
+classes: {
+  standard: {
+    style: {
+      fill: "#FFFFFF"
+      stroke: "#DADCE0"
+      font-color: "#202124"
+      border-radius: 8
+    }
+  }
+  sunstone: {
+    style: {
+      fill: "#E8F0FE"
+      stroke: "#4285F4"
+      font-color: "#174EA6"
+      bold: true
+      border-radius: 10
+    }
+  }
+  vpc: {
+    style: {
+      fill: "#FFFFFF"
+      stroke: "#4285F4"
+      stroke-dash: 4
+      font-color: "#174EA6"
+      border-radius: 16
+    }
+  }
+  vm: {
+    style: {
+      fill: "#F8F9FA"
+      stroke: "#DADCE0"
+      font-color: "#3C4043"
+      border-radius: 12
+    }
+  }
+  proxy: {
+    style: {
+      fill: "#E8F0FE"
+      stroke: "#4285F4"
+      font-color: "#174EA6"
+      border-radius: 8
+    }
+  }
+  http: {
+    style: {
+      fill: "#E6F4EA"
+      stroke: "#34A853"
+      font-color: "#137333"
+      border-radius: 8
+    }
+  }
+  background: {
+    style: {
+      fill: "#FEF7E0"
+      stroke: "#FBBC04"
+      font-color: "#B06000"
+      border-radius: 8
+    }
+  }
+  state: {
+    style: {
+      fill: "#FFFFFF"
+      stroke: "#DADCE0"
+      font-color: "#3C4043"
+      border-radius: 12
+    }
+  }
+  icon: {
+    shape: image
+    width: 64
+    height: 64
+  }
+  connection: {
+    style: {
+      stroke: "#9AA0A6"
+      stroke-width: 2
+    }
+  }
+}
+
+direction: right
+
+operator: Developer {
+  shape: person
+  width: 72
+  height: 72
+  style.fill: "#E8F0FE"
+  style.stroke: "#4285F4"
+}
+
+cicd: CI/CD pipeline {
+  class: standard
+}
+
+sunstone: sunstone\nDeployment CLI {
+  class: sunstone
+}
+
+build: Image build {
+  class: standard
+}
+registry: Artifact Registry {
+  class: icon
+  icon: ./icons/artifact-registry.svg
+}
+
+internet: Internet {
+  shape: cloud
+  style.fill: "#FFFFFF"
+  style.stroke: "#9AA0A6"
+}
+load_balancer: Cloud Load Balancer {
+  class: icon
+  icon: ./icons/cloud-load-balancing.svg
+}
+
+vpc: VPC network {
+  class: vpc
+  direction: down
+  style.font-size: 18
+
+  vm1: Private Compute Engine VM {
+    class: vm
+    direction: down
+
+    runtime: Compute Engine\nContainer-Optimized\nOS + Docker {
+      class: icon
+      icon: ./icons/compute-engine.svg
+    }
+    proxy: Sunbeam proxy {class: proxy}
+    http: HTTP workloads {class: http}
+    background: Background workloads {class: background}
+
+    runtime -- proxy
+    proxy -> http
+    runtime -> background
+  }
+
+  vm2: Private Compute Engine VM {
+    class: vm
+    direction: down
+
+    runtime: Compute Engine\nContainer-Optimized\nOS + Docker {
+      class: icon
+      icon: ./icons/compute-engine.svg
+    }
+    proxy: Sunbeam proxy {class: proxy}
+    http: HTTP workloads {class: http}
+    background: Background workloads {class: background}
+
+    runtime -- proxy
+    proxy -> http
+    runtime -> background
+  }
+}
+
+secrets: Secret Manager {
+  class: icon
+  icon: ./icons/secret-manager.svg
+}
+
+state: Managed state {
+  class: state
+  grid-columns: 3
+
+  sql: Cloud SQL {
+    class: icon
+    icon: ./icons/cloud-sql.svg
+  }
+  cache: Memorystore {
+    class: icon
+    icon: ./icons/memorystore.svg
+  }
+  storage: Cloud Storage {
+    class: icon
+    icon: ./icons/cloud-storage.svg
+  }
+}
+
+logs: Cloud Logging {
+  class: icon
+  icon: ./icons/cloud-logging.svg
+}
+
+operator -> sunstone
+cicd -> sunstone
+cicd -> build
+build -> registry
+internet -> load_balancer
+
+sunstone -> vpc.vm1.runtime: IAP + OS Login + SSH
+sunstone -> vpc.vm2.runtime: IAP + OS Login + SSH
+registry -> vpc.vm1.runtime
+registry -> vpc.vm2.runtime
+load_balancer -> vpc.vm1.proxy
+load_balancer -> vpc.vm2.proxy
+
+vpc.vm1.runtime -> secrets
+vpc.vm2.runtime -> secrets
+vpc.vm1.runtime -> state
+vpc.vm2.runtime -> state
+vpc.vm1.runtime -> logs
+vpc.vm2.runtime -> logs
+
+(** -> **)[*].class: connection
+(** -- **)[*].class: connection
