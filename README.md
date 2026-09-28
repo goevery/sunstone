@@ -18,7 +18,7 @@ Orchestrators like Kubernetes solve important problems. For applications that fi
 
 ## How Sunstone works
 
-![Sunstone architecture](docs/architecture.svg)
+![Sunstone architecture](docs/architecture.png)
 
 A workload runs one container on one or more VMs. Sunstone replaces containers one VM at a time.
 
