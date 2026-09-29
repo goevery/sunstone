@@ -17,7 +17,7 @@ type Route struct {
 	Backend Backend `json:"backend"`
 }
 
-// Backend identifies one loopback container endpoint.
+// Backend identifies one managed container endpoint.
 type Backend struct {
 	Address          string `json:"address"`
 	ContainerID      string `json:"containerId"`

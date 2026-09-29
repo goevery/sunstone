@@ -1,4 +1,4 @@
-// Package routing runs Sunbeam's public proxy and loopback control interface.
+// Package routing runs Sunbeam's public proxy and private control interface.
 package routing
 
 import (
@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	// DefaultControlAddress is Sunbeam's loopback control endpoint.
+	// DefaultControlAddress is Sunbeam's control endpoint on the VM host.
 	DefaultControlAddress = "127.0.0.1:2025"
 	// DefaultStatePath is the route state location intended for a Docker volume.
 	DefaultStatePath = "/var/lib/sunbeam/routes.json"
@@ -46,10 +46,6 @@ type module struct {
 func New(config Config) (Module, error) {
 	if config.TrafficListener == nil || config.ControlListener == nil {
 		return nil, errors.New("traffic and control listeners are required")
-	}
-	controlAddress, ok := config.ControlListener.Addr().(*net.TCPAddr)
-	if !ok || controlAddress.IP == nil || !controlAddress.IP.IsLoopback() {
-		return nil, errors.New("control listener must use a loopback TCP address")
 	}
 	if config.StatePath == "" {
 		return nil, errors.New("state path is required")

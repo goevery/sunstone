@@ -20,7 +20,7 @@ import (
 	"github.com/goevery/sunstone/internal/modules/routing"
 )
 
-func TestRejectsNonLoopbackControlListener(t *testing.T) {
+func TestAcceptsContainerInterfaceControlListener(t *testing.T) {
 	traffic := listen(t)
 	defer traffic.Close()
 	control, err := net.Listen("tcp4", "0.0.0.0:0")
@@ -29,7 +29,7 @@ func TestRejectsNonLoopbackControlListener(t *testing.T) {
 	}
 	defer control.Close()
 
-	_, err = routing.New(routing.Config{
+	module, err := routing.New(routing.Config{
 		TrafficListener: traffic,
 		ControlListener: control,
 		StatePath:       filepath.Join(t.TempDir(), "routes.json"),
@@ -39,8 +39,11 @@ func TestRejectsNonLoopbackControlListener(t *testing.T) {
 		DrainTimeout:    time.Second,
 		ShutdownTimeout: time.Second,
 	})
-	if err == nil {
-		t.Fatal("expected non-loopback control listener to be rejected")
+	if err != nil {
+		t.Fatalf("create routing module: %v", err)
+	}
+	if module == nil {
+		t.Fatal("routing module is nil")
 	}
 }
 

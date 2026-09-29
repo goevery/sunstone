@@ -6,10 +6,14 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
-var routeIDPattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+var (
+	routeIDPattern     = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	backendNamePattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?-[a-f0-9]{12}-[a-f0-9]{8}$`)
+)
 
 func validateRoute(route Route) error {
 	if err := validateRouteName(route.Name); err != nil {
@@ -18,9 +22,11 @@ func validateRoute(route Route) error {
 	if route.Backend.ContainerID == "" {
 		return fmt.Errorf("%w: backend address, container_id, and startup_probe_path are required", ErrInvalidArgument)
 	}
-	host, _, err := net.SplitHostPort(route.Backend.Address)
-	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
-		return fmt.Errorf("%w: backend address must be a loopback IP and port", ErrInvalidArgument)
+	host, port, err := net.SplitHostPort(route.Backend.Address)
+	parsedPort, portErr := strconv.ParseUint(port, 10, 16)
+	ip := net.ParseIP(host)
+	if err != nil || portErr != nil || parsedPort == 0 || len(host) > 63 || !(ip != nil && ip.IsLoopback() || backendNamePattern.MatchString(host)) {
+		return fmt.Errorf("%w: backend address must identify a managed container and port", ErrInvalidArgument)
 	}
 	probe, err := url.ParseRequestURI(route.Backend.StartupProbePath)
 	if err != nil || !strings.HasPrefix(route.Backend.StartupProbePath, "/") || probe.IsAbs() || probe.Host != "" || probe.Fragment != "" {

@@ -79,10 +79,10 @@ func (x *Route) GetBackend() *Backend {
 	return nil
 }
 
-// A loopback workload backend managed by Sunstone.
+// A workload backend on Sunstone's private container network.
 type Backend struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The loopback HTTP address in host:port form.
+	// The managed container's HTTP address in host:port form.
 	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
 	// The Docker container identifier serving this backend.
 	ContainerId string `protobuf:"bytes,2,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`

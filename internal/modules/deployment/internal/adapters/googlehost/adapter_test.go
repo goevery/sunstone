@@ -58,6 +58,46 @@ func TestTOFURejectsChangedHostKey(t *testing.T) {
 	}
 }
 
+func TestHTTPContainerJoinsSunstoneNetworkWithoutHostPort(t *testing.T) {
+	options := containerCreateOptions(deploy.ContainerSpec{
+		HTTP: &deploy.HTTPConfig{ContainerPort: 8080},
+	}, "storefront-0123456789ab-01234567", "fingerprint")
+	if options.NetworkingConfig == nil || options.NetworkingConfig.EndpointsConfig[workloadNetwork] == nil {
+		t.Fatalf("networking config = %+v", options.NetworkingConfig)
+	}
+	if len(options.HostConfig.PortBindings) != 0 {
+		t.Fatalf("host port bindings = %+v", options.HostConfig.PortBindings)
+	}
+	if len(options.Config.ExposedPorts) != 1 {
+		t.Fatalf("exposed ports = %+v", options.Config.ExposedPorts)
+	}
+}
+
+func TestHTTPBackendUsesManagedContainerNetworkName(t *testing.T) {
+	target := deploy.Container{Name: "storefront-0123456789ab-01234567"}
+	address, err := (&host{}).BackendAddress(t.Context(), target, 8080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if address != "storefront-0123456789ab-01234567:8080" {
+		t.Fatalf("backend address = %q", address)
+	}
+}
+
+func TestManagedContainerNameIsDNSLabel(t *testing.T) {
+	name := managedContainerName(
+		"a-very-long-workload-name-that-uses-the-maximum-allowed-label-length",
+		"0123456789abcdef",
+		"01234567",
+	)
+	if len(name) > maximumDNSLabel {
+		t.Fatalf("container name has length %d: %q", len(name), name)
+	}
+	if name != "a-very-long-workload-name-that-uses-the-m-0123456789ab-01234567" {
+		t.Fatalf("container name = %q", name)
+	}
+}
+
 func TestBackgroundConfigurationFingerprintRemainsCompatible(t *testing.T) {
 	fingerprint, err := configurationFingerprint(deploy.ContainerSpec{
 		Image:         deploy.Image{ID: "sha256:image"},

@@ -15,6 +15,7 @@ import (
 
 const (
 	trafficAddress  = ":8080"
+	controlAddress  = ":2025"
 	probeTimeout    = time.Second
 	probeInterval   = time.Second
 	startupDeadline = 5 * time.Minute
@@ -34,7 +35,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("listen for HTTP traffic: %w", err)
 	}
-	control, err := net.Listen("tcp", routing.DefaultControlAddress)
+	control, err := net.Listen("tcp", controlAddress)
 	if err != nil {
 		traffic.Close()
 		return fmt.Errorf("listen for control requests: %w", err)

@@ -13,8 +13,8 @@ import (
 	"maps"
 	"net"
 	"net/http"
-	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +36,8 @@ const (
 	verificationLimit  = 5 * time.Minute
 	verificationPoll   = time.Second
 	maximumLogBytes    = 64 * 1024
+	workloadNetwork    = "sunstone"
+	maximumDNSLabel    = 63
 )
 
 type host struct {
@@ -121,6 +123,9 @@ func (h *host) Matches(ctx context.Context, current deploy.Container, desired de
 	if err != nil {
 		return false, err
 	}
+	if desired.HTTP != nil && (inspected.Container.NetworkSettings == nil || inspected.Container.NetworkSettings.Networks[workloadNetwork] == nil) {
+		return false, nil
+	}
 
 	return inspected.Container.Image == desired.Image.ID &&
 		slices.Equal(inspected.Container.Config.Cmd, expectedCommand) &&
@@ -138,35 +143,8 @@ func (h *host) Create(ctx context.Context, spec deploy.ContainerSpec) (deploy.Co
 	if _, err := rand.Read(suffix); err != nil {
 		return deploy.Container{}, fmt.Errorf("generate container name: %w", err)
 	}
-	name := fmt.Sprintf("%s-%s-%s", spec.Name, fingerprint[:12], hex.EncodeToString(suffix))
-	environment := make([]string, 0, len(spec.Environment))
-	for key, value := range spec.Environment {
-		environment = append(environment, key+"="+value)
-	}
-	slices.Sort(environment)
-	config := &container.Config{
-		Image: spec.Image.ID,
-		Cmd:   spec.Command,
-		Env:   environment,
-		Labels: map[string]string{
-			managedLabel:       "true",
-			workloadLabel:      spec.Workload,
-			configurationLabel: fingerprint,
-		},
-	}
-	hostConfig := &container.HostConfig{
-		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(spec.RestartPolicy)},
-	}
-	if spec.HTTP != nil {
-		port := network.MustParsePort(fmt.Sprintf("%d/tcp", spec.HTTP.ContainerPort))
-		config.ExposedPorts = network.PortSet{port: struct{}{}}
-		hostConfig.PortBindings = network.PortMap{port: []network.PortBinding{{HostIP: netip.MustParseAddr("127.0.0.1")}}}
-	}
-	created, err := h.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Name:       name,
-		Config:     config,
-		HostConfig: hostConfig,
-	})
+	name := managedContainerName(spec.Name, fingerprint, hex.EncodeToString(suffix))
+	created, err := h.docker.ContainerCreate(ctx, containerCreateOptions(spec, name, fingerprint))
 	if err != nil {
 		return deploy.Container{}, err
 	}
@@ -179,20 +157,11 @@ func (h *host) Start(ctx context.Context, target deploy.Container) error {
 	return err
 }
 
-func (h *host) BackendAddress(ctx context.Context, target deploy.Container, containerPort uint16) (string, error) {
-	inspected, err := h.docker.ContainerInspect(ctx, target.ID, client.ContainerInspectOptions{})
-	if err != nil {
-		return "", err
+func (h *host) BackendAddress(_ context.Context, target deploy.Container, containerPort uint16) (string, error) {
+	if target.Name == "" {
+		return "", errors.New("container has no network name")
 	}
-	if inspected.Container.NetworkSettings == nil {
-		return "", errors.New("container has no network settings")
-	}
-	port := network.MustParsePort(fmt.Sprintf("%d/tcp", containerPort))
-	bindings := inspected.Container.NetworkSettings.Ports[port]
-	if len(bindings) != 1 || !bindings[0].HostIP.IsLoopback() || bindings[0].HostPort == "" {
-		return "", fmt.Errorf("container port %d does not have one loopback binding", containerPort)
-	}
-	return net.JoinHostPort(bindings[0].HostIP.String(), bindings[0].HostPort), nil
+	return net.JoinHostPort(target.Name, strconv.FormatUint(uint64(containerPort), 10)), nil
 }
 
 func (h *host) Route(ctx context.Context, workload string) (deploy.Route, bool, error) {
@@ -294,14 +263,62 @@ func (h *host) Remove(ctx context.Context, target deploy.Container) error {
 	return err
 }
 
+func containerCreateOptions(spec deploy.ContainerSpec, name, fingerprint string) client.ContainerCreateOptions {
+	environment := make([]string, 0, len(spec.Environment))
+	for key, value := range spec.Environment {
+		environment = append(environment, key+"="+value)
+	}
+	slices.Sort(environment)
+	config := &container.Config{
+		Image: spec.Image.ID,
+		Cmd:   spec.Command,
+		Env:   environment,
+		Labels: map[string]string{
+			managedLabel:       "true",
+			workloadLabel:      spec.Workload,
+			configurationLabel: fingerprint,
+		},
+	}
+	hostConfig := &container.HostConfig{
+		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(spec.RestartPolicy)},
+	}
+	var networkingConfig *network.NetworkingConfig
+	if spec.HTTP != nil {
+		port := network.MustParsePort(fmt.Sprintf("%d/tcp", spec.HTTP.ContainerPort))
+		config.ExposedPorts = network.PortSet{port: struct{}{}}
+		networkingConfig = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{workloadNetwork: {}},
+		}
+	}
+	return client.ContainerCreateOptions{
+		Name:             name,
+		Config:           config,
+		HostConfig:       hostConfig,
+		NetworkingConfig: networkingConfig,
+	}
+}
+
+func managedContainerName(workload, fingerprint, suffix string) string {
+	maximumWorkloadLength := maximumDNSLabel - len(fingerprint[:12]) - len(suffix) - 2
+	if len(workload) > maximumWorkloadLength {
+		workload = strings.TrimRight(workload[:maximumWorkloadLength], "-")
+	}
+	return fmt.Sprintf("%s-%s-%s", workload, fingerprint[:12], suffix)
+}
+
 func configurationFingerprint(spec deploy.ContainerSpec) (string, error) {
+	networkName := ""
+	if spec.HTTP != nil {
+		networkName = workloadNetwork
+	}
 	encoded, err := json.Marshal(struct {
 		Image         string
 		Command       []string
 		Environment   map[string]string
 		RestartPolicy string
 		HTTP          *deploy.HTTPConfig `json:",omitempty"`
-	}{spec.Image.ID, spec.Command, spec.Environment, spec.RestartPolicy, spec.HTTP})
+		Network       string             `json:",omitempty"`
+	}{spec.Image.ID, spec.Command, spec.Environment, spec.RestartPolicy, spec.HTTP, networkName})
 	if err != nil {
 		return "", fmt.Errorf("encode container configuration: %w", err)
 	}

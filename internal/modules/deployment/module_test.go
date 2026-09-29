@@ -32,7 +32,7 @@ func TestDeploysHTTPReplacementBeforeRemovingPreviousContainer(t *testing.T) {
 			return nil
 		},
 		BackendAddressFunc: func(context.Context, deploy.Container, uint16) (string, error) {
-			return "127.0.0.1:32000", nil
+			return "storefront-0123456789ab-01234567:8080", nil
 		},
 		RouteFunc: func(context.Context, string) (deploy.Route, bool, error) {
 			return deploy.Route{}, false, nil
@@ -70,10 +70,10 @@ func TestCurrentHTTPWorkloadAndRouteAreNotReplaced(t *testing.T) {
 		},
 		MatchesFunc: func(context.Context, deploy.Container, deploy.ContainerSpec) (bool, error) { return true, nil },
 		BackendAddressFunc: func(context.Context, deploy.Container, uint16) (string, error) {
-			return "127.0.0.1:32000", nil
+			return "storefront-0123456789ab-01234567:8080", nil
 		},
 		RouteFunc: func(context.Context, string) (deploy.Route, bool, error) {
-			return deploy.Route{Workload: workload.Name, Address: "127.0.0.1:32000", ContainerID: current.ID, StartupProbePath: "/readyz"}, true, nil
+			return deploy.Route{Workload: workload.Name, Address: "storefront-0123456789ab-01234567:8080", ContainerID: current.ID, StartupProbePath: "/readyz"}, true, nil
 		},
 	}
 	module := moduleWith(t, workload, host)
@@ -106,7 +106,7 @@ func TestFailedHTTPRouteUpdateDoesNotRestartStoppedPreviousContainer(t *testing.
 			return nil
 		},
 		BackendAddressFunc: func(context.Context, deploy.Container, uint16) (string, error) {
-			return "127.0.0.1:32000", nil
+			return "storefront-0123456789ab-01234567:8080", nil
 		},
 		UpdateRouteFunc: func(context.Context, deploy.Route) error { return errors.New("not ready") },
 		LogsFunc:        func(context.Context, deploy.Container) (string, error) { return "booting", nil },
