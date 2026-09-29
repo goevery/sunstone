@@ -1,27 +1,37 @@
 GO ?= go
+BUILD_DIR ?= build
 IMAGE ?= localhost/sunbeam:dev
+SUNBEAM_BINARY := $(BUILD_DIR)/sunbeam
+SUNBEAM_SOURCES := $(shell find cmd/sunbeam internal/gen/sunbeam internal/modules/routing -name '*.go') go.mod go.sum Makefile
 
 D2_SOURCES := docs/diagrams/architecture.d2 $(wildcard docs/diagrams/icons/*.svg)
 PROTOC_GEN_GO := $(shell $(GO) tool -n protoc-gen-go)
 PROTOC_GEN_CONNECT_GO := $(shell $(GO) tool -n protoc-gen-connect-go)
 PROTO_SOURCES := $(wildcard api/sunbeam/v1/*.proto)
 
-.PHONY: all generate image
+.PHONY: all clean generate image sunbeam
 
 all: docs/diagrams/architecture.png
 
-image:
+sunbeam: $(SUNBEAM_BINARY)
+
+$(SUNBEAM_BINARY): $(SUNBEAM_SOURCES)
+	mkdir -p "$(@D)"
+	CGO_ENABLED=0 GOOS=linux $(GO) build -trimpath -ldflags='-s -w' -o "$@" ./cmd/sunbeam
+
+image: sunbeam
 	@set -eu; \
-	output="$$(mktemp -d)"; \
 	container=""; \
-	trap 'if [ -n "$$container" ]; then buildah rm "$$container" >/dev/null 2>&1 || true; fi; rm -rf "$$output"' EXIT HUP INT TERM; \
-	CGO_ENABLED=0 GOOS=linux $(GO) build -trimpath -ldflags='-s -w' -o "$$output/sunbeam" ./cmd/sunbeam; \
+	trap 'if [ -n "$$container" ]; then buildah rm "$$container" >/dev/null 2>&1 || true; fi' EXIT HUP INT TERM; \
 	container="$$(buildah from scratch)"; \
-	buildah copy "$$container" "$$output/sunbeam" /sunbeam >/dev/null; \
+	buildah copy "$$container" "$(SUNBEAM_BINARY)" /sunbeam >/dev/null; \
 	buildah config --entrypoint '["/sunbeam"]' --port 80/tcp --volume /var/lib/sunbeam "$$container"; \
 	buildah commit --rm "$$container" "$(IMAGE)" >/dev/null; \
 	container=""; \
 	echo "Built $(IMAGE)"
+
+clean:
+	rm -rf -- "$(BUILD_DIR)"
 
 generate:
 	protoc -I api -I third_party/googleapis -I /usr/include \
