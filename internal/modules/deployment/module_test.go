@@ -58,6 +58,123 @@ func TestDeploysHTTPReplacementBeforeRemovingPreviousContainer(t *testing.T) {
 	assertStrings(t, events, []string{"create", "start-new", "route", "remove-old"})
 }
 
+func TestDeploysHTTPWorkloadToVMsSequentially(t *testing.T) {
+	workload := backgroundWorkload()
+	workload.HTTP = &deploy.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	workload.GCP.Instances = []deploy.Instance{
+		{Zone: "us-central1-a", Name: "web-1"},
+		{Zone: "us-central1-b", Name: "web-2"},
+	}
+	var events []string
+	hosts := map[string]deploy.Host{
+		"web-1": successfulHTTPHost(&events, "web-1", "container-1"),
+		"web-2": successfulHTTPHost(&events, "web-2", "container-2"),
+	}
+	loader := &mockLoader{LoadFunc: func(string) (deploy.Workload, error) { return workload, nil }}
+	connector := &mockConnector{
+		ConnectFunc: func(_ context.Context, target deploy.Target, _ string) (deploy.Host, error) {
+			events = append(events, "connect-"+target.Instance)
+			return hosts[target.Instance], nil
+		},
+	}
+	module := newModule(loader, connector, io.Discard)
+
+	result, err := module.Deploy(context.Background(), Request{
+		Filename:                  "workload.yaml",
+		ImpersonateServiceAccount: "operator@example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Instances) != 2 || result.Instances[0].Instance != "web-1" || result.Instances[0].Container != "container-1" || !result.Instances[0].Changed {
+		t.Fatalf("first instance result = %+v", result.Instances)
+	}
+	if result.Instances[1].Instance != "web-2" || result.Instances[1].Container != "container-2" || !result.Instances[1].Changed {
+		t.Fatalf("second instance result = %+v", result.Instances)
+	}
+	assertStrings(t, events, []string{
+		"connect-web-1", "pull-web-1", "start-web-1", "route-web-1", "close-web-1",
+		"connect-web-2", "pull-web-2", "start-web-2", "route-web-2", "close-web-2",
+	})
+}
+
+func TestFailedHTTPVMReturnsCompletedResultsAndStopsRollout(t *testing.T) {
+	workload := backgroundWorkload()
+	workload.HTTP = &deploy.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	workload.GCP.Instances = []deploy.Instance{
+		{Zone: "us-central1-a", Name: "web-1"},
+		{Zone: "us-central1-b", Name: "web-2"},
+		{Zone: "us-central1-c", Name: "web-3"},
+	}
+	var events []string
+	first := successfulHTTPHost(&events, "web-1", "container-1")
+	previous := deploy.Container{ID: "old-2", Running: true, Healthy: true}
+	second := &mockHost{
+		CloseFunc: func() error {
+			events = append(events, "close-web-2")
+			return nil
+		},
+		PullFunc: func(context.Context, string) (deploy.Image, error) {
+			events = append(events, "pull-web-2")
+			return deploy.Image{ID: "sha256:image-v1"}, nil
+		},
+		WorkloadContainersFunc: func(context.Context, string) ([]deploy.Container, error) {
+			return []deploy.Container{previous}, nil
+		},
+		MatchesFunc: func(context.Context, deploy.Container, deploy.ContainerSpec) (bool, error) { return false, nil },
+		CreateFunc: func(context.Context, deploy.ContainerSpec) (deploy.Container, error) {
+			return deploy.Container{ID: "new-2"}, nil
+		},
+		StartFunc: func(context.Context, deploy.Container) error {
+			events = append(events, "start-web-2")
+			return nil
+		},
+		BackendAddressFunc: func(context.Context, deploy.Container, uint16) (string, error) {
+			return "storefront-0123456789ab-01234567:8080", nil
+		},
+		UpdateRouteFunc: func(context.Context, deploy.Route) error {
+			events = append(events, "route-web-2")
+			return errors.New("not ready")
+		},
+		LogsFunc: func(context.Context, deploy.Container) (string, error) { return "booting", nil },
+		RemoveFunc: func(_ context.Context, container deploy.Container) error {
+			events = append(events, "remove-"+container.ID)
+			return nil
+		},
+	}
+	loader := &mockLoader{LoadFunc: func(string) (deploy.Workload, error) { return workload, nil }}
+	connector := &mockConnector{
+		ConnectFunc: func(_ context.Context, target deploy.Target, _ string) (deploy.Host, error) {
+			events = append(events, "connect-"+target.Instance)
+			switch target.Instance {
+			case "web-1":
+				return first, nil
+			case "web-2":
+				return second, nil
+			default:
+				t.Fatalf("unexpected connection to %s", target.Instance)
+				return nil, nil
+			}
+		},
+	}
+	module := newModule(loader, connector, io.Discard)
+
+	result, err := module.Deploy(context.Background(), Request{
+		Filename:                  "workload.yaml",
+		ImpersonateServiceAccount: "operator@example.com",
+	})
+	if err == nil || !strings.Contains(err.Error(), "deploy to web-2: update route replacement: not ready") {
+		t.Fatalf("expected second VM route error, got %v", err)
+	}
+	if len(result.Instances) != 1 || result.Instances[0].Instance != "web-1" {
+		t.Fatalf("partial result = %+v", result)
+	}
+	assertStrings(t, events, []string{
+		"connect-web-1", "pull-web-1", "start-web-1", "route-web-1", "close-web-1",
+		"connect-web-2", "pull-web-2", "start-web-2", "route-web-2", "remove-new-2", "close-web-2",
+	})
+}
+
 func TestCurrentHTTPWorkloadAndRouteAreNotReplaced(t *testing.T) {
 	workload := backgroundWorkload()
 	workload.HTTP = &deploy.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
@@ -649,6 +766,34 @@ func successfulHost(events *[]string, instance, container string) deploy.Host {
 		},
 		VerifyFunc: func(context.Context, deploy.Container) error {
 			*events = append(*events, "verify-"+instance)
+			return nil
+		},
+	}
+}
+
+func successfulHTTPHost(events *[]string, instance, container string) deploy.Host {
+	return &mockHost{
+		CloseFunc: func() error {
+			*events = append(*events, "close-"+instance)
+			return nil
+		},
+		PullFunc: func(context.Context, string) (deploy.Image, error) {
+			*events = append(*events, "pull-"+instance)
+			return deploy.Image{ID: "sha256:image-v1"}, nil
+		},
+		WorkloadContainersFunc: func(context.Context, string) ([]deploy.Container, error) { return nil, nil },
+		CreateFunc: func(context.Context, deploy.ContainerSpec) (deploy.Container, error) {
+			return deploy.Container{ID: container}, nil
+		},
+		StartFunc: func(context.Context, deploy.Container) error {
+			*events = append(*events, "start-"+instance)
+			return nil
+		},
+		BackendAddressFunc: func(context.Context, deploy.Container, uint16) (string, error) {
+			return "storefront-0123456789ab-01234567:8080", nil
+		},
+		UpdateRouteFunc: func(context.Context, deploy.Route) error {
+			*events = append(*events, "route-"+instance)
 			return nil
 		},
 	}

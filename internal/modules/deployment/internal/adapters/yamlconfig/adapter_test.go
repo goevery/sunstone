@@ -170,7 +170,7 @@ http:
 	}
 }
 
-func TestRejectsMultipleHTTPInstances(t *testing.T) {
+func TestLoadsHTTPWorkloadWithMultipleInstancesInSourceOrder(t *testing.T) {
 	filename := writeConfig(t, `
 name: storefront
 gcp:
@@ -186,9 +186,12 @@ http:
     httpGet: {path: /readyz}
 `)
 
-	_, err := yamlconfig.New().Load(filename)
-	if err == nil || !strings.Contains(err.Error(), "exactly one") {
-		t.Fatalf("expected multiple instance error, got %v", err)
+	workload, err := yamlconfig.New().Load(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workload.GCP.Instances) != 2 || workload.GCP.Instances[0].Name != "web-1" || workload.GCP.Instances[1].Name != "web-2" {
+		t.Fatalf("instances = %+v", workload.GCP.Instances)
 	}
 }
 

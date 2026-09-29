@@ -69,9 +69,6 @@ func (*Adapter) Load(filename string) (deploy.Workload, error) {
 		if !routeIDPattern.MatchString(document.Name) {
 			return deploy.Workload{}, errors.New("HTTP workload name must be a lowercase DNS label")
 		}
-		if len(instances) != 1 {
-			return deploy.Workload{}, errors.New("HTTP workloads require exactly one GCP instance")
-		}
 		if document.HTTP.ContainerPort < 1 || document.HTTP.ContainerPort > 65535 {
 			return deploy.Workload{}, errors.New("http.containerPort must be between 1 and 65535")
 		}
