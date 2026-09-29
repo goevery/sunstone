@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google AIP"
+  short_description: "Design and review APIs against Google AIPs"
+  default_prompt: "Use $google-aip to design or review this protobuf API against the relevant Google AIPs."

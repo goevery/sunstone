@@ -1,0 +1,33 @@
+{
+  "source": "https://github.com/aip-dev/google.aip.dev",
+  "branch": "master",
+  "commit": "23e176e7333ea3bc6b085f9950a5da03d2bbfc72",
+  "commitDate": "2026-08-17T15:25:32-07:00",
+  "tree": "e309cfb11b800887c706fd2c070edb9b162e76ce",
+  "website": {
+    "branch": "gh-pages",
+    "commit": "d8659cc83af9b219ec3973bbd09e2963079e1519",
+    "commitDate": "2026-08-17T22:33:45Z"
+  },
+  "syncedAt": "2026-08-18T09:27:23.092Z",
+  "scope": "aip/general",
+  "count": 73,
+  "transformation": "Formatted with Oxfmt; repository-local links resolved and bundled",
+  "dependencies": {
+    "contentHash": "96e1c7196365a27f127df404bcfab18021ca0ada727ede6dc06c566998878fd2",
+    "count": 1,
+    "files": [
+      "gh-pages:assets/misc/ebnf-filtering.txt"
+    ]
+  },
+  "licenses": {
+    "content": {
+      "name": "Creative Commons Attribution 4.0 International",
+      "url": "https://creativecommons.org/licenses/by/4.0/"
+    },
+    "codeSamples": {
+      "name": "Apache License 2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0"
+    }
+  }
+}

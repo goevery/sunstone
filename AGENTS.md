@@ -12,6 +12,14 @@ Follow `golang-standards/project-layout`, with binaries in `cmd/` and applicatio
 
 Design modules for depth: keep interfaces small while concentrating meaningful behavior behind them. Organize cohesive behavior under `features/` and place external integrations under `adapters/`. Introduce an internal seam and adapter only when behavior genuinely varies; do not create interfaces or pass-through packages speculatively.
 
+## Code organization
+
+Write each file so it can be read from overview to detail. Follow the language’s conventions. Put shared constants and types near the top. Show the public API and its orchestration before the private functions that support them. Place new code where it fits this flow and improve the code you touch rather than carry obsolete patterns forward.
+
+Keep related statements together. Use blank lines to separate independent steps, including when a new step follows a control-flow block. When a block returns control or signals an error after other work, leave a blank line before that step.
+
+Require collaborators explicitly and provide them at the composition root. Do not use optional dependencies with fallback implementations.
+
 ```text
 .
 ├── api/
@@ -52,6 +60,10 @@ Design modules for depth: keep interfaces small while concentrating meaningful b
 ### Issue tracker
 
 Issues are tracked in GitHub Issues for `goevery/sunstone`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Issue triage uses the five canonical engineering-skill labels. See `docs/agents/triage-labels.md`.
 
 ### Pull requests
 
