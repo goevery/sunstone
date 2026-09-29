@@ -20,6 +20,30 @@ import (
 	"github.com/goevery/sunstone/internal/modules/routing"
 )
 
+func TestRejectsNonLoopbackControlListener(t *testing.T) {
+	traffic := listen(t)
+	defer traffic.Close()
+	control, err := net.Listen("tcp4", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer control.Close()
+
+	_, err = routing.New(routing.Config{
+		TrafficListener: traffic,
+		ControlListener: control,
+		StatePath:       filepath.Join(t.TempDir(), "routes.json"),
+		ProbeTimeout:    time.Second,
+		ProbeInterval:   time.Second,
+		StartupDeadline: time.Second,
+		DrainTimeout:    time.Second,
+		ShutdownTimeout: time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected non-loopback control listener to be rejected")
+	}
+}
+
 func TestRejectsMalformedPersistedState(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "routes.json")
 	if err := os.WriteFile(statePath, []byte(`{"version":1,"route":`), 0600); err != nil {
@@ -46,11 +70,21 @@ func TestRejectsMalformedPersistedState(t *testing.T) {
 }
 
 func TestRoutesTrafficAfterCandidateStarts(t *testing.T) {
+	type observedRequest struct {
+		method     string
+		host       string
+		requestURI string
+		forwarded  string
+		body       string
+	}
+	observed := make(chan observedRequest, 1)
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/readyz" {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		body, _ := io.ReadAll(request.Body)
+		observed <- observedRequest{method: request.Method, host: request.Host, requestURI: request.URL.RequestURI(), forwarded: request.Header.Get("X-Forwarded-For"), body: string(body)}
 		_, _ = io.WriteString(w, "candidate")
 	}))
 	defer backend.Close()
@@ -102,8 +136,27 @@ func TestRoutesTrafficAfterCandidateStarts(t *testing.T) {
 	if updated.Msg.GetBackend().GetContainerId() != "container-1" {
 		t.Fatalf("updated route = %+v", updated.Msg)
 	}
+	got, err := client.GetRoute(context.Background(), connect.NewRequest(&sunbeampb.GetRouteRequest{Name: "routes/storefront"}))
+	if err != nil || got.Msg.GetBackend().GetContainerId() != "container-1" {
+		t.Fatalf("get route = %+v, %v", got, err)
+	}
+	listed, err := client.ListRoutes(context.Background(), connect.NewRequest(&sunbeampb.ListRoutesRequest{}))
+	if err != nil || len(listed.Msg.GetRoutes()) != 1 {
+		t.Fatalf("list routes = %+v, %v", listed, err)
+	}
+	different := routeRequest("container-2", backend.Listener.Addr().String())
+	different.Route.Name = "routes/another"
+	if _, err := client.UpdateRoute(context.Background(), connect.NewRequest(different)); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Fatalf("second catch-all route error = %v", err)
+	}
 
-	response, err = http.Get("http://" + traffic.Addr().String() + "/hello?from=test")
+	proxyRequest, err := http.NewRequest(http.MethodPost, "http://"+traffic.Addr().String()+"/hello?from=test", strings.NewReader("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyRequest.Host = "storefront.example"
+	proxyRequest.Header.Set("X-Forwarded-For", "spoofed")
+	response, err = http.DefaultClient.Do(proxyRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +167,10 @@ func TestRoutesTrafficAfterCandidateStarts(t *testing.T) {
 	}
 	if response.StatusCode != http.StatusOK || string(body) != "candidate" {
 		t.Fatalf("proxied response = %d %q", response.StatusCode, body)
+	}
+	request := <-observed
+	if request.method != http.MethodPost || request.host != "storefront.example" || request.requestURI != "/hello?from=test" || request.body != "payload" || request.forwarded == "spoofed" || request.forwarded == "" {
+		t.Fatalf("proxied request = %+v", request)
 	}
 
 	cancel()
@@ -260,6 +317,51 @@ func TestRouteUpdateDrainsAdmittedRequest(t *testing.T) {
 	if err := <-updated; err != nil {
 		t.Fatal(err)
 	}
+	if body := getBody(t, running.traffic); body != "replacement" {
+		t.Fatalf("new response = %q", body)
+	}
+}
+
+func TestDrainDeadlineCancelsStuckRequest(t *testing.T) {
+	admitted := make(chan struct{})
+	canceled := make(chan struct{})
+	current := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/readyz" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		close(admitted)
+		<-request.Context().Done()
+		close(canceled)
+	}))
+	defer current.Close()
+	replacement := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/readyz" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_, _ = io.WriteString(w, "replacement")
+	}))
+	defer replacement.Close()
+
+	running := startRouting(t, filepath.Join(t.TempDir(), "routes.json"), time.Second)
+	updateRoute(t, running.client, "container-current", current.Listener.Addr().String())
+	requestDone := make(chan struct{})
+	go func() {
+		response, _ := http.Get(running.traffic)
+		if response != nil {
+			response.Body.Close()
+		}
+		close(requestDone)
+	}()
+	<-admitted
+	updateRoute(t, running.client, "container-new", replacement.Listener.Addr().String())
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("stuck backend request was not canceled")
+	}
+	<-requestDone
 	if body := getBody(t, running.traffic); body != "replacement" {
 		t.Fatalf("new response = %q", body)
 	}

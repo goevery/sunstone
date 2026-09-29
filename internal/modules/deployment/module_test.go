@@ -87,10 +87,10 @@ func TestCurrentHTTPWorkloadAndRouteAreNotReplaced(t *testing.T) {
 	}
 }
 
-func TestFailedHTTPRouteUpdateRemovesReplacementWithoutRestartingPrevious(t *testing.T) {
+func TestFailedHTTPRouteUpdateDoesNotRestartStoppedPreviousContainer(t *testing.T) {
 	workload := backgroundWorkload()
 	workload.HTTP = &deploy.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
-	previous := deploy.Container{ID: "old", Running: true, Healthy: true}
+	previous := deploy.Container{ID: "old"}
 	replacement := deploy.Container{ID: "new"}
 	var events []string
 	host := &mockHost{

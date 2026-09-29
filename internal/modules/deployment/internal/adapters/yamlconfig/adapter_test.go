@@ -170,6 +170,28 @@ http:
 	}
 }
 
+func TestRejectsMultipleHTTPInstances(t *testing.T) {
+	filename := writeConfig(t, `
+name: storefront
+gcp:
+  project: acme-prod
+  instances:
+    - {zone: us-central1-a, name: web-1}
+    - {zone: us-central1-b, name: web-2}
+container:
+  image: example/storefront
+http:
+  containerPort: 8080
+  startupProbe:
+    httpGet: {path: /readyz}
+`)
+
+	_, err := yamlconfig.New().Load(filename)
+	if err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("expected multiple instance error, got %v", err)
+	}
+}
+
 func TestRejectsUnsupportedConfiguration(t *testing.T) {
 	filename := writeConfig(t, `
 name: storefront-web
