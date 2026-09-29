@@ -2,6 +2,7 @@ GO ?= go
 BUILD_DIR ?= build
 IMAGE ?= localhost/sunbeam:dev
 SUNBEAM_BINARY := $(BUILD_DIR)/sunbeam
+SUNBEAM_STATE_DIR := $(BUILD_DIR)/sunbeam-state
 SUNBEAM_SOURCES := $(shell find cmd/sunbeam internal/gen/sunbeam internal/modules/routing -name '*.go') go.mod go.sum Makefile
 
 D2_SOURCES := docs/diagrams/architecture.d2 $(wildcard docs/diagrams/icons/*.svg)
@@ -23,9 +24,11 @@ image: sunbeam
 	@set -eu; \
 	container=""; \
 	trap 'if [ -n "$$container" ]; then buildah rm "$$container" >/dev/null 2>&1 || true; fi' EXIT HUP INT TERM; \
+	mkdir -p "$(SUNBEAM_STATE_DIR)"; \
 	container="$$(buildah from scratch)"; \
 	buildah copy "$$container" "$(SUNBEAM_BINARY)" /sunbeam >/dev/null; \
-	buildah config --entrypoint '["/sunbeam"]' --port 80/tcp --volume /var/lib/sunbeam "$$container"; \
+	buildah copy --chown 65532:65532 "$$container" "$(SUNBEAM_STATE_DIR)" /var/lib/sunbeam >/dev/null; \
+	buildah config --entrypoint '["/sunbeam"]' --user 65532:65532 --port 8080/tcp --volume /var/lib/sunbeam "$$container"; \
 	buildah commit --rm "$$container" "$(IMAGE)" >/dev/null; \
 	container=""; \
 	echo "Built $(IMAGE)"

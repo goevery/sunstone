@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	trafficAddress  = ":80"
+	trafficAddress  = ":8080"
 	probeTimeout    = time.Second
 	probeInterval   = time.Second
 	startupDeadline = 5 * time.Minute
