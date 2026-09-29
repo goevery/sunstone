@@ -58,6 +58,20 @@ func TestTOFURejectsChangedHostKey(t *testing.T) {
 	}
 }
 
+func TestBackgroundConfigurationFingerprintRemainsCompatible(t *testing.T) {
+	fingerprint, err := configurationFingerprint(deploy.ContainerSpec{
+		Image:         deploy.Image{ID: "sha256:image"},
+		RestartPolicy: "unless-stopped",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const previousFingerprint = "a567ec426a494c90501fe4577041ae3bf2dedcd84e11371e52d720bf00f463b4"
+	if fingerprint != previousFingerprint {
+		t.Fatalf("background fingerprint = %q, want %q", fingerprint, previousFingerprint)
+	}
+}
+
 func TestConfigurationFingerprintDoesNotExposeEnvironment(t *testing.T) {
 	fingerprint, err := configurationFingerprint(deploy.ContainerSpec{
 		Image:         deploy.Image{ID: "sha256:image"},

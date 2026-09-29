@@ -72,10 +72,11 @@ func (b *backend) serve(writer http.ResponseWriter, request *http.Request) {
 	b.proxy.ServeHTTP(writer, request.WithContext(requestCtx))
 }
 
-func (b *backend) drain(timeout time.Duration) {
+func (b *backend) drain(timeout time.Duration, activate func()) {
 	b.mu.Lock()
 	b.draining = true
 	drained := b.drained
+	activate()
 	b.mu.Unlock()
 
 	timer := time.NewTimer(timeout)

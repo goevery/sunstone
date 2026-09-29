@@ -13,6 +13,7 @@ require (
 	cloud.google.com/go/oslogin v1.19.0
 	connectrpc.com/connect v1.21.0
 	github.com/cedws/iapc v0.1.12
+	github.com/coder/websocket v1.8.15
 	github.com/moby/moby/api v1.56.0
 	github.com/moby/moby/client v0.6.0
 	github.com/urfave/cli/v3 v3.13.0
@@ -38,7 +39,6 @@ require (
 	github.com/brunoga/deep v1.3.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/d2lang/d2 v0.9.0 // indirect

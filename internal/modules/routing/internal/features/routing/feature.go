@@ -67,6 +67,9 @@ func (f *Feature) Proxy(writer http.ResponseWriter, request *http.Request) {
 
 // GetRoute returns the named route.
 func (f *Feature) GetRoute(name string) (Route, error) {
+	if err := validateRouteName(name); err != nil {
+		return Route{}, err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.route == nil || f.route.Name != name {
@@ -124,11 +127,13 @@ func (f *Feature) UpdateRoute(ctx context.Context, requested Route, paths []stri
 	}
 
 	next := newBackend(candidate)
-	previous := f.active.Swap(next)
-	f.route = &candidate
-	if previous != nil {
-		previous.drain(f.config.DrainTimeout)
+	previous := f.active.Load()
+	if previous == nil {
+		f.active.Store(next)
+	} else {
+		previous.drain(f.config.DrainTimeout, func() { f.active.Store(next) })
 	}
+	f.route = &candidate
 
 	return candidate, nil
 }

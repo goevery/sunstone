@@ -1,6 +1,7 @@
 package routing_test
 
 import (
+	"bufio"
 	"context"
 	"io"
 	"net"
@@ -8,10 +9,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/coder/websocket"
 	"github.com/goevery/sunstone/internal/gen/sunbeam/v1"
 	"github.com/goevery/sunstone/internal/gen/sunbeam/v1/sunbeampbconnect"
 	"github.com/goevery/sunstone/internal/modules/routing"
@@ -116,6 +119,74 @@ func TestRoutesTrafficAfterCandidateStarts(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestForwardsStreamingAndWebSocketTraffic(t *testing.T) {
+	releaseStream := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/readyz":
+			w.WriteHeader(http.StatusNoContent)
+		case "/stream":
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				t.Error("backend response does not support flushing")
+				return
+			}
+			_, _ = io.WriteString(w, "first\n")
+			flusher.Flush()
+			<-releaseStream
+			_, _ = io.WriteString(w, "second\n")
+		case "/socket":
+			connection, err := websocket.Accept(w, request, nil)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer connection.CloseNow()
+			messageType, message, err := connection.Read(request.Context())
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if err := connection.Write(request.Context(), messageType, message); err != nil {
+				t.Error(err)
+			}
+		}
+	}))
+	defer backend.Close()
+
+	running := startRouting(t, filepath.Join(t.TempDir(), "routes.json"), time.Second)
+	updateRoute(t, running.client, "container-1", backend.Listener.Addr().String())
+	response, err := http.Get(running.traffic + "/stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(response.Body)
+	first, err := reader.ReadString('\n')
+	if err != nil || first != "first\n" {
+		t.Fatalf("first streamed chunk = %q, %v", first, err)
+	}
+	close(releaseStream)
+	second, err := reader.ReadString('\n')
+	response.Body.Close()
+	if err != nil || second != "second\n" {
+		t.Fatalf("second streamed chunk = %q, %v", second, err)
+	}
+
+	websocketURL := "ws" + strings.TrimPrefix(running.traffic, "http") + "/socket"
+	connection, _, err := websocket.Dial(context.Background(), websocketURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.CloseNow()
+	if err := connection.Write(context.Background(), websocket.MessageText, []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	_, message, err := connection.Read(context.Background())
+	if err != nil || string(message) != "hello" {
+		t.Fatalf("websocket response = %q, %v", message, err)
 	}
 }
 
