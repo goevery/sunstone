@@ -55,6 +55,10 @@ Require collaborators explicitly and provide them at the composition root. Do no
 └── go.sum
 ```
 
+## Git
+
+Use Conventional Commits for commit messages and pull request titles so Release Please can determine semantic versions and generate release notes.
+
 ## Agent skills
 
 ### Issue tracker

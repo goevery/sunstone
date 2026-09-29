@@ -36,6 +36,9 @@ go.work.sum
 .scratch/
 .reference/
 
+# Short-lived Google GitHub Actions credentials
+gha-creds-*.json
+
 # Terraform
 .terraform/
 *.tfstate
