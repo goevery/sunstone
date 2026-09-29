@@ -9,7 +9,7 @@ import (
 
 const restartPolicy = "unless-stopped"
 
-// Feature coordinates one background workload deployment.
+// Feature coordinates one workload deployment across its target VMs.
 type Feature struct {
 	loader    Loader
 	connector Connector
@@ -98,6 +98,7 @@ func (f *Feature) deployToInstance(ctx context.Context, workload Workload, targe
 		Command:       workload.Container.Command,
 		Environment:   workload.Container.Environment,
 		RestartPolicy: restartPolicy,
+		HTTP:          workload.HTTP,
 	}
 
 	containers, err := host.WorkloadContainers(ctx, workload.Name)
@@ -107,6 +108,10 @@ func (f *Feature) deployToInstance(ctx context.Context, workload Workload, targe
 	if len(containers) > 1 {
 		return InstanceResult{}, fmt.Errorf("workload %s has %d managed containers; refusing ambiguous state", workload.Name, len(containers))
 	}
+	if workload.HTTP != nil {
+		return f.deployHTTP(ctx, host, workload, target, spec, containers)
+	}
+
 	var previous *Container
 	var rollbackPrevious *Container
 	if len(containers) == 1 {
@@ -160,6 +165,67 @@ func (f *Feature) deployToInstance(ctx context.Context, workload Workload, targe
 
 	fmt.Fprintf(f.progress, "%s / %s: healthy\n", workload.Name, target.Instance)
 	return InstanceResult{Zone: target.Zone, Instance: target.Instance, Container: container.ID, Changed: true}, nil
+}
+
+func (f *Feature) deployHTTP(ctx context.Context, host Host, workload Workload, target Target, spec ContainerSpec, containers []Container) (InstanceResult, error) {
+	var previous *Container
+	if len(containers) == 1 {
+		current := containers[0]
+		matches, err := host.Matches(ctx, current, spec)
+		if err != nil {
+			return InstanceResult{}, fmt.Errorf("compare current container: %w", err)
+		}
+		if matches && current.Running {
+			address, err := host.BackendAddress(ctx, current, workload.HTTP.ContainerPort)
+			if err != nil {
+				return InstanceResult{}, fmt.Errorf("find current HTTP backend: %w", err)
+			}
+			desiredRoute := Route{Workload: workload.Name, Address: address, ContainerID: current.ID, StartupProbePath: workload.HTTP.StartupProbePath}
+			activeRoute, found, err := host.Route(ctx, workload.Name)
+			if err != nil {
+				return InstanceResult{}, fmt.Errorf("get current route: %w", err)
+			}
+			if found && activeRoute == desiredRoute {
+				fmt.Fprintf(f.progress, "%s / %s: current\n", workload.Name, target.Instance)
+				return InstanceResult{Zone: target.Zone, Instance: target.Instance, Container: current.ID}, nil
+			}
+			fmt.Fprintf(f.progress, "%s / %s: routing\n", workload.Name, target.Instance)
+			if err := host.UpdateRoute(ctx, desiredRoute); err != nil {
+				return InstanceResult{}, fmt.Errorf("update route: %w", err)
+			}
+			fmt.Fprintf(f.progress, "%s / %s: drained\n", workload.Name, target.Instance)
+			fmt.Fprintf(f.progress, "%s / %s: healthy\n", workload.Name, target.Instance)
+			return InstanceResult{Zone: target.Zone, Instance: target.Instance, Container: current.ID, Changed: true}, nil
+		}
+		previous = &current
+	}
+
+	replacement, err := host.Create(ctx, spec)
+	if err != nil {
+		return InstanceResult{}, fmt.Errorf("create replacement: %w", err)
+	}
+	fmt.Fprintf(f.progress, "%s / %s: starting\n", workload.Name, target.Instance)
+	if err := host.Start(ctx, replacement); err != nil {
+		return InstanceResult{}, replacementFailure(ctx, host, replacement, nil, "start", err)
+	}
+	address, err := host.BackendAddress(ctx, replacement, workload.HTTP.ContainerPort)
+	if err != nil {
+		return InstanceResult{}, replacementFailure(ctx, host, replacement, nil, "find HTTP backend", err)
+	}
+	route := Route{Workload: workload.Name, Address: address, ContainerID: replacement.ID, StartupProbePath: workload.HTTP.StartupProbePath}
+	fmt.Fprintf(f.progress, "%s / %s: routing\n", workload.Name, target.Instance)
+	if err := host.UpdateRoute(ctx, route); err != nil {
+		return InstanceResult{}, replacementFailure(ctx, host, replacement, nil, "update route", err)
+	}
+	fmt.Fprintf(f.progress, "%s / %s: drained\n", workload.Name, target.Instance)
+	if previous != nil {
+		if err := host.Remove(ctx, *previous); err != nil {
+			return InstanceResult{}, fmt.Errorf("remove previous container after draining: %w", err)
+		}
+	}
+
+	fmt.Fprintf(f.progress, "%s / %s: healthy\n", workload.Name, target.Instance)
+	return InstanceResult{Zone: target.Zone, Instance: target.Instance, Container: replacement.ID, Changed: true}, nil
 }
 
 func replacementFailure(ctx context.Context, host Host, replacement Container, previous *Container, phase string, cause error) error {

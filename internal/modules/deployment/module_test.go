@@ -10,6 +10,120 @@ import (
 	"github.com/goevery/sunstone/internal/modules/deployment/internal/features/deploy"
 )
 
+func TestDeploysHTTPReplacementBeforeRemovingPreviousContainer(t *testing.T) {
+	workload := backgroundWorkload()
+	workload.HTTP = &deploy.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	previous := deploy.Container{ID: "old", Running: true, Healthy: true}
+	replacement := deploy.Container{ID: "new"}
+	var events []string
+	host := &mockHost{
+		CloseFunc: func() error { return nil },
+		PullFunc:  func(context.Context, string) (deploy.Image, error) { return deploy.Image{ID: "image"}, nil },
+		WorkloadContainersFunc: func(context.Context, string) ([]deploy.Container, error) {
+			return []deploy.Container{previous}, nil
+		},
+		MatchesFunc: func(context.Context, deploy.Container, deploy.ContainerSpec) (bool, error) { return false, nil },
+		CreateFunc: func(context.Context, deploy.ContainerSpec) (deploy.Container, error) {
+			events = append(events, "create")
+			return replacement, nil
+		},
+		StartFunc: func(context.Context, deploy.Container) error {
+			events = append(events, "start-new")
+			return nil
+		},
+		BackendAddressFunc: func(context.Context, deploy.Container, uint16) (string, error) {
+			return "127.0.0.1:32000", nil
+		},
+		RouteFunc: func(context.Context, string) (deploy.Route, bool, error) {
+			return deploy.Route{}, false, nil
+		},
+		UpdateRouteFunc: func(context.Context, deploy.Route) error {
+			events = append(events, "route")
+			return nil
+		},
+		RemoveFunc: func(_ context.Context, container deploy.Container) error {
+			events = append(events, "remove-"+container.ID)
+			return nil
+		},
+	}
+	module := moduleWith(t, workload, host)
+
+	result, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", ImpersonateServiceAccount: "operator@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Instances) != 1 || !result.Instances[0].Changed {
+		t.Fatalf("result = %+v", result)
+	}
+	assertStrings(t, events, []string{"create", "start-new", "route", "remove-old"})
+}
+
+func TestCurrentHTTPWorkloadAndRouteAreNotReplaced(t *testing.T) {
+	workload := backgroundWorkload()
+	workload.HTTP = &deploy.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	current := deploy.Container{ID: "current", Running: true, Healthy: true}
+	host := &mockHost{
+		CloseFunc: func() error { return nil },
+		PullFunc:  func(context.Context, string) (deploy.Image, error) { return deploy.Image{ID: "image"}, nil },
+		WorkloadContainersFunc: func(context.Context, string) ([]deploy.Container, error) {
+			return []deploy.Container{current}, nil
+		},
+		MatchesFunc: func(context.Context, deploy.Container, deploy.ContainerSpec) (bool, error) { return true, nil },
+		BackendAddressFunc: func(context.Context, deploy.Container, uint16) (string, error) {
+			return "127.0.0.1:32000", nil
+		},
+		RouteFunc: func(context.Context, string) (deploy.Route, bool, error) {
+			return deploy.Route{Workload: workload.Name, Address: "127.0.0.1:32000", ContainerID: current.ID, StartupProbePath: "/readyz"}, true, nil
+		},
+	}
+	module := moduleWith(t, workload, host)
+
+	result, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", ImpersonateServiceAccount: "operator@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Instances) != 1 || result.Instances[0].Changed {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestFailedHTTPRouteUpdateRemovesReplacementWithoutRestartingPrevious(t *testing.T) {
+	workload := backgroundWorkload()
+	workload.HTTP = &deploy.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	previous := deploy.Container{ID: "old", Running: true, Healthy: true}
+	replacement := deploy.Container{ID: "new"}
+	var events []string
+	host := &mockHost{
+		CloseFunc: func() error { return nil },
+		PullFunc:  func(context.Context, string) (deploy.Image, error) { return deploy.Image{ID: "image"}, nil },
+		WorkloadContainersFunc: func(context.Context, string) ([]deploy.Container, error) {
+			return []deploy.Container{previous}, nil
+		},
+		MatchesFunc: func(context.Context, deploy.Container, deploy.ContainerSpec) (bool, error) { return false, nil },
+		CreateFunc:  func(context.Context, deploy.ContainerSpec) (deploy.Container, error) { return replacement, nil },
+		StartFunc: func(_ context.Context, container deploy.Container) error {
+			events = append(events, "start-"+container.ID)
+			return nil
+		},
+		BackendAddressFunc: func(context.Context, deploy.Container, uint16) (string, error) {
+			return "127.0.0.1:32000", nil
+		},
+		UpdateRouteFunc: func(context.Context, deploy.Route) error { return errors.New("not ready") },
+		LogsFunc:        func(context.Context, deploy.Container) (string, error) { return "booting", nil },
+		RemoveFunc: func(_ context.Context, container deploy.Container) error {
+			events = append(events, "remove-"+container.ID)
+			return nil
+		},
+	}
+	module := moduleWith(t, workload, host)
+
+	_, err := module.Deploy(context.Background(), Request{Filename: "workload.yaml", ImpersonateServiceAccount: "operator@example.com"})
+	if err == nil || !strings.Contains(err.Error(), "update route replacement: not ready") || !strings.Contains(err.Error(), "booting") {
+		t.Fatalf("expected route diagnostics, got %v", err)
+	}
+	assertStrings(t, events, []string{"start-new", "remove-new"})
+}
+
 func TestDeploysBackgroundWorkloadToVMsSequentially(t *testing.T) {
 	workload := backgroundWorkload()
 	workload.GCP.Instances = []deploy.Instance{

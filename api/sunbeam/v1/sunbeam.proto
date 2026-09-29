@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package sunstone.sunbeam.v1;
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/field_mask.proto";
+
+option go_package = "github.com/goevery/sunstone/internal/gen/sunbeam/v1;sunbeampb";
+option java_multiple_files = true;
+option java_outer_classname = "SunbeamProto";
+option java_package = "dev.sunstone.sunbeam.v1";
+
+// Sunbeam manages the active HTTP route on a workload VM.
+service Sunbeam {
+  // Gets a route.
+  rpc GetRoute(GetRouteRequest) returns (Route) {
+    option (google.api.http) = {get: "/v1/{name=routes/*}"};
+    option (google.api.method_signature) = "name";
+  }
+
+  // Lists routes.
+  rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse) {
+    option (google.api.http) = {get: "/v1/routes"};
+    option (google.api.method_signature) = "";
+  }
+
+  // Updates a route after its candidate backend becomes ready.
+  rpc UpdateRoute(UpdateRouteRequest) returns (Route) {
+    option (google.api.http) = {
+      patch: "/v1/{route.name=routes/*}"
+      body: "route"
+    };
+    option (google.api.method_signature) = "route,update_mask";
+  }
+}
+
+// A catch-all HTTP route to one workload backend.
+message Route {
+  option (google.api.resource) = {
+    type: "sunbeam.sunstone.dev/Route"
+    pattern: "routes/{route}"
+    singular: "route"
+    plural: "routes"
+  };
+
+  // The resource name of the route.
+  // Format: routes/{route}
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+
+  // The backend that receives HTTP traffic.
+  Backend backend = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+// A loopback workload backend managed by Sunstone.
+message Backend {
+  // The loopback HTTP address in host:port form.
+  string address = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The Docker container identifier serving this backend.
+  string container_id = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // The origin-form path used to determine whether this backend has started.
+  string startup_probe_path = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+// The request for GetRoute.
+message GetRouteRequest {
+  // The route to retrieve.
+  // Format: routes/{route}
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {type: "sunbeam.sunstone.dev/Route"}
+  ];
+}
+
+// The request for ListRoutes.
+message ListRoutesRequest {
+  // The maximum number of routes to return. The service may return fewer.
+  // Values above 100 are coerced to 100. The default is 50.
+  int32 page_size = 1 [(google.api.field_behavior) = OPTIONAL];
+
+  // A token from a previous ListRoutes call for the next page.
+  string page_token = 2 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The response from ListRoutes.
+message ListRoutesResponse {
+  // The configured routes.
+  repeated Route routes = 1;
+
+  // A token for the next page, or empty when there are no more routes.
+  string next_page_token = 2;
+}
+
+// The request for UpdateRoute.
+message UpdateRouteRequest {
+  // The route to update. Its name identifies the route.
+  Route route = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // The fields to update, relative to Route. An omitted mask updates populated fields.
+  google.protobuf.FieldMask update_mask = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Creates the route when it does not already exist.
+  bool allow_missing = 3 [(google.api.field_behavior) = OPTIONAL];
+}

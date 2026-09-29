@@ -119,6 +119,57 @@ container:
 	}
 }
 
+func TestLoadsMinimalHTTPWorkload(t *testing.T) {
+	filename := writeConfig(t, `
+name: storefront
+gcp:
+  project: acme-prod
+  instances: [{zone: us-central1-a, name: web-1}]
+container:
+  image: example/storefront
+http:
+  containerPort: 8080
+  startupProbe:
+    httpGet:
+      path: /readyz
+`)
+
+	workload, err := yamlconfig.New().Load(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workload.HTTP == nil || workload.HTTP.ContainerPort != 8080 || workload.HTTP.StartupProbePath != "/readyz" {
+		t.Fatalf("HTTP configuration = %+v", workload.HTTP)
+	}
+}
+
+func TestRejectsInvalidHTTPConfiguration(t *testing.T) {
+	tests := map[string]string{
+		"missing port": `startupProbe: {httpGet: {path: /readyz}}`,
+		"invalid port": `containerPort: 70000
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"missing probe": `containerPort: 8080`,
+		"invalid path": `containerPort: 8080
+  startupProbe: {httpGet: {path: readyz}}`,
+	}
+	for name, httpConfig := range tests {
+		t.Run(name, func(t *testing.T) {
+			filename := writeConfig(t, `
+name: storefront
+gcp:
+  project: acme-prod
+  instances: [{zone: us-central1-a, name: web-1}]
+container:
+  image: example/storefront
+http:
+  `+httpConfig+"\n")
+			if _, err := yamlconfig.New().Load(filename); err == nil {
+				t.Fatal("expected invalid HTTP configuration")
+			}
+		})
+	}
+}
+
 func TestRejectsUnsupportedConfiguration(t *testing.T) {
 	filename := writeConfig(t, `
 name: storefront-web
@@ -134,7 +185,7 @@ http:
 `)
 
 	_, err := yamlconfig.New().Load(filename)
-	if err == nil || !strings.Contains(err.Error(), "field http not found") {
+	if err == nil || !strings.Contains(err.Error(), "field port not found") {
 		t.Fatalf("expected unsupported field error, got %v", err)
 	}
 }

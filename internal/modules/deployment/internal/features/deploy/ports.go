@@ -12,7 +12,7 @@ type Connector interface {
 	Connect(context.Context, Target, string) (Host, error)
 }
 
-// Host exposes the container operations needed by a deployment.
+// Host exposes the container and routing operations needed on one VM.
 type Host interface {
 	Close() error
 	Pull(context.Context, string) (Image, error)
@@ -20,17 +20,21 @@ type Host interface {
 	Matches(context.Context, Container, ContainerSpec) (bool, error)
 	Create(context.Context, ContainerSpec) (Container, error)
 	Start(context.Context, Container) error
+	BackendAddress(context.Context, Container, uint16) (string, error)
+	Route(context.Context, string) (Route, bool, error)
+	UpdateRoute(context.Context, Route) error
 	Stop(context.Context, Container) error
 	Verify(context.Context, Container) error
 	Logs(context.Context, Container) (string, error)
 	Remove(context.Context, Container) error
 }
 
-// Workload is the desired background workload loaded from configuration.
+// Workload is the desired container workload loaded from configuration.
 type Workload struct {
 	Name      string
 	GCP       GCP
 	Container ContainerConfig
+	HTTP      *HTTPConfig
 }
 
 // GCP identifies the project and target instances for a workload.
@@ -50,6 +54,12 @@ type ContainerConfig struct {
 	Image       string
 	Command     []string
 	Environment map[string]string
+}
+
+// HTTPConfig selects HTTP deployment and describes its startup gate.
+type HTTPConfig struct {
+	ContainerPort    uint16
+	StartupProbePath string
 }
 
 // Target identifies one Compute Engine VM.
@@ -74,6 +84,14 @@ type Container struct {
 	Healthy bool
 }
 
+// Route describes the backend Sunbeam should receive traffic through.
+type Route struct {
+	Workload         string
+	Address          string
+	ContainerID      string
+	StartupProbePath string
+}
+
 // ContainerSpec is the desired runtime configuration.
 type ContainerSpec struct {
 	Name          string
@@ -82,4 +100,5 @@ type ContainerSpec struct {
 	Command       []string
 	Environment   map[string]string
 	RestartPolicy string
+	HTTP          *HTTPConfig
 }

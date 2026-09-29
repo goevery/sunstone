@@ -11,13 +11,20 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
+	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 	"time"
 
+	"connectrpc.com/connect"
+	sunbeampb "github.com/goevery/sunstone/internal/gen/sunbeam/v1"
+	"github.com/goevery/sunstone/internal/gen/sunbeam/v1/sunbeampbconnect"
 	"github.com/goevery/sunstone/internal/modules/deployment/internal/features/deploy"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 	"golang.org/x/crypto/ssh"
 )
@@ -32,11 +39,14 @@ const (
 )
 
 type host struct {
-	docker *client.Client
-	ssh    *ssh.Client
+	docker           *client.Client
+	ssh              *ssh.Client
+	controlTransport *http.Transport
+	routes           sunbeampbconnect.SunbeamClient
 }
 
 func (h *host) Close() error {
+	h.controlTransport.CloseIdleConnections()
 	return errors.Join(h.docker.Close(), h.ssh.Close())
 }
 
@@ -107,10 +117,16 @@ func (h *host) Matches(ctx context.Context, current deploy.Container, desired de
 	maps.Copy(expectedEnvironment, desired.Environment)
 	actualEnvironment := environmentMap(inspected.Container.Config.Env)
 
+	fingerprint, err := configurationFingerprint(desired)
+	if err != nil {
+		return false, err
+	}
+
 	return inspected.Container.Image == desired.Image.ID &&
 		slices.Equal(inspected.Container.Config.Cmd, expectedCommand) &&
 		maps.Equal(actualEnvironment, expectedEnvironment) &&
-		string(inspected.Container.HostConfig.RestartPolicy.Name) == desired.RestartPolicy, nil
+		string(inspected.Container.HostConfig.RestartPolicy.Name) == desired.RestartPolicy &&
+		inspected.Container.Config.Labels[configurationLabel] == fingerprint, nil
 }
 
 func (h *host) Create(ctx context.Context, spec deploy.ContainerSpec) (deploy.Container, error) {
@@ -128,21 +144,28 @@ func (h *host) Create(ctx context.Context, spec deploy.ContainerSpec) (deploy.Co
 		environment = append(environment, key+"="+value)
 	}
 	slices.Sort(environment)
+	config := &container.Config{
+		Image: spec.Image.ID,
+		Cmd:   spec.Command,
+		Env:   environment,
+		Labels: map[string]string{
+			managedLabel:       "true",
+			workloadLabel:      spec.Workload,
+			configurationLabel: fingerprint,
+		},
+	}
+	hostConfig := &container.HostConfig{
+		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(spec.RestartPolicy)},
+	}
+	if spec.HTTP != nil {
+		port := network.MustParsePort(fmt.Sprintf("%d/tcp", spec.HTTP.ContainerPort))
+		config.ExposedPorts = network.PortSet{port: struct{}{}}
+		hostConfig.PortBindings = network.PortMap{port: []network.PortBinding{{HostIP: netip.MustParseAddr("127.0.0.1")}}}
+	}
 	created, err := h.docker.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Name: name,
-		Config: &container.Config{
-			Image: spec.Image.ID,
-			Cmd:   spec.Command,
-			Env:   environment,
-			Labels: map[string]string{
-				managedLabel:       "true",
-				workloadLabel:      spec.Workload,
-				configurationLabel: fingerprint,
-			},
-		},
-		HostConfig: &container.HostConfig{
-			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(spec.RestartPolicy)},
-		},
+		Name:       name,
+		Config:     config,
+		HostConfig: hostConfig,
 	})
 	if err != nil {
 		return deploy.Container{}, err
@@ -154,6 +177,57 @@ func (h *host) Create(ctx context.Context, spec deploy.ContainerSpec) (deploy.Co
 func (h *host) Start(ctx context.Context, target deploy.Container) error {
 	_, err := h.docker.ContainerStart(ctx, target.ID, client.ContainerStartOptions{})
 	return err
+}
+
+func (h *host) BackendAddress(ctx context.Context, target deploy.Container, containerPort uint16) (string, error) {
+	inspected, err := h.docker.ContainerInspect(ctx, target.ID, client.ContainerInspectOptions{})
+	if err != nil {
+		return "", err
+	}
+	if inspected.Container.NetworkSettings == nil {
+		return "", errors.New("container has no network settings")
+	}
+	port := network.MustParsePort(fmt.Sprintf("%d/tcp", containerPort))
+	bindings := inspected.Container.NetworkSettings.Ports[port]
+	if len(bindings) != 1 || !bindings[0].HostIP.IsLoopback() || bindings[0].HostPort == "" {
+		return "", fmt.Errorf("container port %d does not have one loopback binding", containerPort)
+	}
+	return net.JoinHostPort(bindings[0].HostIP.String(), bindings[0].HostPort), nil
+}
+
+func (h *host) Route(ctx context.Context, workload string) (deploy.Route, bool, error) {
+	response, err := h.routes.GetRoute(ctx, connect.NewRequest(&sunbeampb.GetRouteRequest{Name: "routes/" + workload}))
+	if connect.CodeOf(err) == connect.CodeNotFound {
+		return deploy.Route{}, false, nil
+	}
+	if err != nil {
+		return deploy.Route{}, false, err
+	}
+	return routeFromProto(response.Msg), true, nil
+}
+
+func (h *host) UpdateRoute(ctx context.Context, route deploy.Route) error {
+	_, err := h.routes.UpdateRoute(ctx, connect.NewRequest(&sunbeampb.UpdateRouteRequest{
+		Route: &sunbeampb.Route{
+			Name: "routes/" + route.Workload,
+			Backend: &sunbeampb.Backend{
+				Address:          route.Address,
+				ContainerId:      route.ContainerID,
+				StartupProbePath: route.StartupProbePath,
+			},
+		},
+		AllowMissing: true,
+	}))
+	return err
+}
+
+func routeFromProto(route *sunbeampb.Route) deploy.Route {
+	return deploy.Route{
+		Workload:         strings.TrimPrefix(route.GetName(), "routes/"),
+		Address:          route.GetBackend().GetAddress(),
+		ContainerID:      route.GetBackend().GetContainerId(),
+		StartupProbePath: route.GetBackend().GetStartupProbePath(),
+	}
 }
 
 func (h *host) Stop(ctx context.Context, target deploy.Container) error {
@@ -226,7 +300,8 @@ func configurationFingerprint(spec deploy.ContainerSpec) (string, error) {
 		Command       []string
 		Environment   map[string]string
 		RestartPolicy string
-	}{spec.Image.ID, spec.Command, spec.Environment, spec.RestartPolicy})
+		HTTP          *deploy.HTTPConfig `json:",omitempty"`
+	}{spec.Image.ID, spec.Command, spec.Environment, spec.RestartPolicy, spec.HTTP})
 	if err != nil {
 		return "", fmt.Errorf("encode container configuration: %w", err)
 	}

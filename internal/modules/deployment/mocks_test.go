@@ -165,6 +165,9 @@ var _ deploy.Host = &mockHost{}
 //
 //		// make and configure a mocked deploy.Host
 //		mockedHost := &mockHost{
+//			BackendAddressFunc: func(context1 context.Context, container deploy.Container, v uint16) (string, error) {
+//				panic("mock out the BackendAddress method")
+//			},
 //			CloseFunc: func() error {
 //				panic("mock out the Close method")
 //			},
@@ -183,11 +186,17 @@ var _ deploy.Host = &mockHost{}
 //			RemoveFunc: func(context1 context.Context, container deploy.Container) error {
 //				panic("mock out the Remove method")
 //			},
+//			RouteFunc: func(context1 context.Context, s string) (deploy.Route, bool, error) {
+//				panic("mock out the Route method")
+//			},
 //			StartFunc: func(context1 context.Context, container deploy.Container) error {
 //				panic("mock out the Start method")
 //			},
 //			StopFunc: func(context1 context.Context, container deploy.Container) error {
 //				panic("mock out the Stop method")
+//			},
+//			UpdateRouteFunc: func(context1 context.Context, route deploy.Route) error {
+//				panic("mock out the UpdateRoute method")
 //			},
 //			VerifyFunc: func(context1 context.Context, container deploy.Container) error {
 //				panic("mock out the Verify method")
@@ -202,6 +211,9 @@ var _ deploy.Host = &mockHost{}
 //
 //	}
 type mockHost struct {
+	// BackendAddressFunc mocks the BackendAddress method.
+	BackendAddressFunc func(context1 context.Context, container deploy.Container, v uint16) (string, error)
+
 	// CloseFunc mocks the Close method.
 	CloseFunc func() error
 
@@ -220,11 +232,17 @@ type mockHost struct {
 	// RemoveFunc mocks the Remove method.
 	RemoveFunc func(context1 context.Context, container deploy.Container) error
 
+	// RouteFunc mocks the Route method.
+	RouteFunc func(context1 context.Context, s string) (deploy.Route, bool, error)
+
 	// StartFunc mocks the Start method.
 	StartFunc func(context1 context.Context, container deploy.Container) error
 
 	// StopFunc mocks the Stop method.
 	StopFunc func(context1 context.Context, container deploy.Container) error
+
+	// UpdateRouteFunc mocks the UpdateRoute method.
+	UpdateRouteFunc func(context1 context.Context, route deploy.Route) error
 
 	// VerifyFunc mocks the Verify method.
 	VerifyFunc func(context1 context.Context, container deploy.Container) error
@@ -234,6 +252,15 @@ type mockHost struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// BackendAddress holds details about calls to the BackendAddress method.
+		BackendAddress []struct {
+			// Context1 is the context1 argument value.
+			Context1 context.Context
+			// Container is the container argument value.
+			Container deploy.Container
+			// V is the v argument value.
+			V uint16
+		}
 		// Close holds details about calls to the Close method.
 		Close []struct {
 		}
@@ -274,6 +301,13 @@ type mockHost struct {
 			// Container is the container argument value.
 			Container deploy.Container
 		}
+		// Route holds details about calls to the Route method.
+		Route []struct {
+			// Context1 is the context1 argument value.
+			Context1 context.Context
+			// S is the s argument value.
+			S string
+		}
 		// Start holds details about calls to the Start method.
 		Start []struct {
 			// Context1 is the context1 argument value.
@@ -287,6 +321,13 @@ type mockHost struct {
 			Context1 context.Context
 			// Container is the container argument value.
 			Container deploy.Container
+		}
+		// UpdateRoute holds details about calls to the UpdateRoute method.
+		UpdateRoute []struct {
+			// Context1 is the context1 argument value.
+			Context1 context.Context
+			// Route is the route argument value.
+			Route deploy.Route
 		}
 		// Verify holds details about calls to the Verify method.
 		Verify []struct {
@@ -303,16 +344,59 @@ type mockHost struct {
 			S string
 		}
 	}
+	lockBackendAddress     sync.RWMutex
 	lockClose              sync.RWMutex
 	lockCreate             sync.RWMutex
 	lockLogs               sync.RWMutex
 	lockMatches            sync.RWMutex
 	lockPull               sync.RWMutex
 	lockRemove             sync.RWMutex
+	lockRoute              sync.RWMutex
 	lockStart              sync.RWMutex
 	lockStop               sync.RWMutex
+	lockUpdateRoute        sync.RWMutex
 	lockVerify             sync.RWMutex
 	lockWorkloadContainers sync.RWMutex
+}
+
+// BackendAddress calls BackendAddressFunc.
+func (mock *mockHost) BackendAddress(context1 context.Context, container deploy.Container, v uint16) (string, error) {
+	if mock.BackendAddressFunc == nil {
+		panic("mockHost.BackendAddressFunc: method is nil but Host.BackendAddress was just called")
+	}
+	callInfo := struct {
+		Context1  context.Context
+		Container deploy.Container
+		V         uint16
+	}{
+		Context1:  context1,
+		Container: container,
+		V:         v,
+	}
+	mock.lockBackendAddress.Lock()
+	mock.calls.BackendAddress = append(mock.calls.BackendAddress, callInfo)
+	mock.lockBackendAddress.Unlock()
+	return mock.BackendAddressFunc(context1, container, v)
+}
+
+// BackendAddressCalls gets all the calls that were made to BackendAddress.
+// Check the length with:
+//
+//	len(mockedHost.BackendAddressCalls())
+func (mock *mockHost) BackendAddressCalls() []struct {
+	Context1  context.Context
+	Container deploy.Container
+	V         uint16
+} {
+	var calls []struct {
+		Context1  context.Context
+		Container deploy.Container
+		V         uint16
+	}
+	mock.lockBackendAddress.RLock()
+	calls = mock.calls.BackendAddress
+	mock.lockBackendAddress.RUnlock()
+	return calls
 }
 
 // Close calls CloseFunc.
@@ -526,6 +610,42 @@ func (mock *mockHost) RemoveCalls() []struct {
 	return calls
 }
 
+// Route calls RouteFunc.
+func (mock *mockHost) Route(context1 context.Context, s string) (deploy.Route, bool, error) {
+	if mock.RouteFunc == nil {
+		panic("mockHost.RouteFunc: method is nil but Host.Route was just called")
+	}
+	callInfo := struct {
+		Context1 context.Context
+		S        string
+	}{
+		Context1: context1,
+		S:        s,
+	}
+	mock.lockRoute.Lock()
+	mock.calls.Route = append(mock.calls.Route, callInfo)
+	mock.lockRoute.Unlock()
+	return mock.RouteFunc(context1, s)
+}
+
+// RouteCalls gets all the calls that were made to Route.
+// Check the length with:
+//
+//	len(mockedHost.RouteCalls())
+func (mock *mockHost) RouteCalls() []struct {
+	Context1 context.Context
+	S        string
+} {
+	var calls []struct {
+		Context1 context.Context
+		S        string
+	}
+	mock.lockRoute.RLock()
+	calls = mock.calls.Route
+	mock.lockRoute.RUnlock()
+	return calls
+}
+
 // Start calls StartFunc.
 func (mock *mockHost) Start(context1 context.Context, container deploy.Container) error {
 	if mock.StartFunc == nil {
@@ -595,6 +715,42 @@ func (mock *mockHost) StopCalls() []struct {
 	mock.lockStop.RLock()
 	calls = mock.calls.Stop
 	mock.lockStop.RUnlock()
+	return calls
+}
+
+// UpdateRoute calls UpdateRouteFunc.
+func (mock *mockHost) UpdateRoute(context1 context.Context, route deploy.Route) error {
+	if mock.UpdateRouteFunc == nil {
+		panic("mockHost.UpdateRouteFunc: method is nil but Host.UpdateRoute was just called")
+	}
+	callInfo := struct {
+		Context1 context.Context
+		Route    deploy.Route
+	}{
+		Context1: context1,
+		Route:    route,
+	}
+	mock.lockUpdateRoute.Lock()
+	mock.calls.UpdateRoute = append(mock.calls.UpdateRoute, callInfo)
+	mock.lockUpdateRoute.Unlock()
+	return mock.UpdateRouteFunc(context1, route)
+}
+
+// UpdateRouteCalls gets all the calls that were made to UpdateRoute.
+// Check the length with:
+//
+//	len(mockedHost.UpdateRouteCalls())
+func (mock *mockHost) UpdateRouteCalls() []struct {
+	Context1 context.Context
+	Route    deploy.Route
+} {
+	var calls []struct {
+		Context1 context.Context
+		Route    deploy.Route
+	}
+	mock.lockUpdateRoute.RLock()
+	calls = mock.calls.UpdateRoute
+	mock.lockUpdateRoute.RUnlock()
 	return calls
 }
 

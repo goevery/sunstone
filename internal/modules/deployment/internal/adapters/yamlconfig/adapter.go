@@ -4,11 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"regexp"
 
 	"github.com/goevery/sunstone/internal/modules/deployment/internal/features/deploy"
 	"go.yaml.in/yaml/v3"
 )
+
+var routeIDPattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // Adapter loads the initial single-document YAML workload format.
 type Adapter struct{}
@@ -60,6 +64,28 @@ func (*Adapter) Load(filename string) (deploy.Workload, error) {
 		instances[index] = instance
 	}
 
+	var httpConfig *deploy.HTTPConfig
+	if document.HTTP != nil {
+		if !routeIDPattern.MatchString(document.Name) {
+			return deploy.Workload{}, errors.New("HTTP workload name must be a lowercase DNS label")
+		}
+		if len(instances) != 1 {
+			return deploy.Workload{}, errors.New("HTTP workloads require exactly one GCP instance")
+		}
+		if document.HTTP.ContainerPort < 1 || document.HTTP.ContainerPort > 65535 {
+			return deploy.Workload{}, errors.New("http.containerPort must be between 1 and 65535")
+		}
+		if document.HTTP.StartupProbe == nil || document.HTTP.StartupProbe.HTTPGet == nil {
+			return deploy.Workload{}, errors.New("http.startupProbe.httpGet.path is required")
+		}
+		path := document.HTTP.StartupProbe.HTTPGet.Path
+		parsed, err := url.ParseRequestURI(path)
+		if err != nil || path == "" || path[0] != '/' || parsed.IsAbs() || parsed.Host != "" || parsed.Fragment != "" {
+			return deploy.Workload{}, errors.New("http.startupProbe.httpGet.path must be an origin-form absolute path")
+		}
+		httpConfig = &deploy.HTTPConfig{ContainerPort: uint16(document.HTTP.ContainerPort), StartupProbePath: path}
+	}
+
 	return deploy.Workload{
 		Name: document.Name,
 		GCP: deploy.GCP{
@@ -71,6 +97,7 @@ func (*Adapter) Load(filename string) (deploy.Workload, error) {
 			Command:     document.Container.Command,
 			Environment: map[string]string(document.Container.Environment),
 		},
+		HTTP: httpConfig,
 	}, nil
 }
 
@@ -78,6 +105,7 @@ type workloadDocument struct {
 	Name      string            `yaml:"name"`
 	GCP       gcpDocument       `yaml:"gcp"`
 	Container containerDocument `yaml:"container"`
+	HTTP      *httpDocument     `yaml:"http"`
 }
 
 type gcpDocument struct {
@@ -94,6 +122,19 @@ type containerDocument struct {
 	Image       string            `yaml:"image"`
 	Command     []string          `yaml:"command"`
 	Environment strictEnvironment `yaml:"env"`
+}
+
+type httpDocument struct {
+	ContainerPort int                   `yaml:"containerPort"`
+	StartupProbe  *startupProbeDocument `yaml:"startupProbe"`
+}
+
+type startupProbeDocument struct {
+	HTTPGet *httpGetDocument `yaml:"httpGet"`
+}
+
+type httpGetDocument struct {
+	Path string `yaml:"path"`
 }
 
 type strictEnvironment map[string]string

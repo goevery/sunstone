@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,9 @@ import (
 	"cloud.google.com/go/oslogin/apiv1/osloginpb"
 	"cloud.google.com/go/oslogin/common/commonpb"
 	"github.com/cedws/iapc/iap"
+	"github.com/goevery/sunstone/internal/gen/sunbeam/v1/sunbeampbconnect"
 	"github.com/goevery/sunstone/internal/modules/deployment/internal/features/deploy"
+	"github.com/goevery/sunstone/internal/modules/routing"
 	"github.com/moby/moby/client"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/oauth2"
@@ -153,7 +156,19 @@ func openHost(tunnel net.Conn, signer ssh.Signer, username, hostAlias string, ho
 		return nil, fmt.Errorf("create Docker client: %w", err)
 	}
 
-	return &host{docker: dockerClient, ssh: sshClient}, nil
+	controlTransport := &http.Transport{
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return sshClient.DialContext(ctx, "tcp", routing.DefaultControlAddress)
+		},
+	}
+	controlClient := &http.Client{Transport: controlTransport}
+
+	return &host{
+		docker:           dockerClient,
+		ssh:              sshClient,
+		controlTransport: controlTransport,
+		routes:           sunbeampbconnect.NewSunbeamClient(controlClient, "http://sunbeam"),
+	}, nil
 }
 
 func generateKey() (ssh.Signer, error) {
