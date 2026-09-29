@@ -36,6 +36,89 @@ container:
 	}
 }
 
+func TestLoadsMultipleInstancesInSourceOrder(t *testing.T) {
+	filename := writeConfig(t, `
+name: storefront-jobs
+gcp:
+  project: acme-prod
+  instances:
+    - zone: us-central1-a
+      name: jobs-1
+    - zone: us-central1-b
+      name: jobs-1
+container:
+  image: docker.io/example/jobs:v1
+`)
+
+	workload, err := yamlconfig.New().Load(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workload.GCP.Instances) != 2 ||
+		workload.GCP.Instances[0].Zone != "us-central1-a" ||
+		workload.GCP.Instances[1].Zone != "us-central1-b" {
+		t.Fatalf("instances = %+v", workload.GCP.Instances)
+	}
+}
+
+func TestRejectsInvalidInstanceLists(t *testing.T) {
+	tests := map[string]string{
+		"empty": `
+name: storefront-jobs
+gcp:
+  project: acme-prod
+  instances: []
+container:
+  image: example/jobs
+`,
+		"missing name": `
+name: storefront-jobs
+gcp:
+  project: acme-prod
+  instances: [{zone: us-central1-a}]
+container:
+  image: example/jobs
+`,
+		"missing zone": `
+name: storefront-jobs
+gcp:
+  project: acme-prod
+  instances: [{name: jobs-1}]
+container:
+  image: example/jobs
+`,
+	}
+
+	for name, config := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := yamlconfig.New().Load(writeConfig(t, config))
+			if err == nil {
+				t.Fatal("expected invalid instance list to be rejected")
+			}
+		})
+	}
+}
+
+func TestRejectsDuplicateInstances(t *testing.T) {
+	filename := writeConfig(t, `
+name: storefront-jobs
+gcp:
+  project: acme-prod
+  instances:
+    - zone: us-central1-a
+      name: jobs-1
+    - zone: us-central1-a
+      name: jobs-1
+container:
+  image: docker.io/example/jobs:v1
+`)
+
+	_, err := yamlconfig.New().Load(filename)
+	if err == nil || !strings.Contains(err.Error(), "duplicate GCP instance us-central1-a/jobs-1") {
+		t.Fatalf("expected duplicate instance error, got %v", err)
+	}
+}
+
 func TestRejectsUnsupportedConfiguration(t *testing.T) {
 	filename := writeConfig(t, `
 name: storefront-web

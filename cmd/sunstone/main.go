@@ -48,7 +48,7 @@ func deployCommand() *cli.Command {
 		Name:        "deploy",
 		Usage:       "Deploy a background workload",
 		UsageText:   "sunstone deploy -f FILE --impersonate-service-account EMAIL",
-		Description: "Validate one background workload definition and deploy it to its configured VM.",
+		Description: "Validate one background workload definition and deploy it sequentially to its configured VMs.",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:      "filename",

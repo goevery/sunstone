@@ -9,7 +9,7 @@ import (
 	"github.com/goevery/sunstone/internal/modules/deployment/internal/features/deploy"
 )
 
-// Module deploys background workloads to their configured VM.
+// Module deploys background workloads sequentially to their configured VMs.
 type Module interface {
 	Deploy(context.Context, Request) (Result, error)
 }
@@ -20,9 +20,15 @@ type Request struct {
 	ImpersonateServiceAccount string
 }
 
-// Result describes the observable outcome of a deployment.
+// Result describes the completed instances in a workload deployment.
 type Result struct {
 	Workload  string
+	Instances []InstanceResult
+}
+
+// InstanceResult describes the observable outcome on one target VM.
+type InstanceResult struct {
+	Zone      string
 	Instance  string
 	Container string
 	Changed   bool
@@ -48,5 +54,10 @@ func newModule(loader deploy.Loader, connector deploy.Connector, progress io.Wri
 
 func (m *module) Deploy(ctx context.Context, request Request) (Result, error) {
 	result, err := m.feature.Deploy(ctx, request.Filename, request.ImpersonateServiceAccount)
-	return Result(result), err
+	instances := make([]InstanceResult, len(result.Instances))
+	for index, instance := range result.Instances {
+		instances[index] = InstanceResult(instance)
+	}
+
+	return Result{Workload: result.Workload, Instances: instances}, err
 }

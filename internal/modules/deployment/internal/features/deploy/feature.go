@@ -16,9 +16,15 @@ type Feature struct {
 	progress  io.Writer
 }
 
-// Result describes the observable outcome of a deployment.
+// Result describes the completed instances in a workload deployment.
 type Result struct {
 	Workload  string
+	Instances []InstanceResult
+}
+
+// InstanceResult describes the observable outcome on one target VM.
+type InstanceResult struct {
+	Zone      string
 	Instance  string
 	Container string
 	Changed   bool
@@ -29,7 +35,7 @@ func New(loader Loader, connector Connector, progress io.Writer) *Feature {
 	return &Feature{loader: loader, connector: connector, progress: progress}
 }
 
-// Deploy loads and deploys the workload in filename.
+// Deploy loads and sequentially deploys the workload in filename.
 func (f *Feature) Deploy(ctx context.Context, filename, serviceAccount string) (Result, error) {
 	workload, err := f.loader.Load(filename)
 	if err != nil {
@@ -39,22 +45,51 @@ func (f *Feature) Deploy(ctx context.Context, filename, serviceAccount string) (
 		return Result{}, errors.New("service account to impersonate is required")
 	}
 
-	target := Target{
-		Project:  workload.GCP.Project,
-		Zone:     workload.GCP.Instances[0].Zone,
-		Instance: workload.GCP.Instances[0].Name,
+	result := Result{Workload: workload.Name}
+	for _, instance := range workload.GCP.Instances {
+		target := Target{
+			Project:  workload.GCP.Project,
+			Zone:     instance.Zone,
+			Instance: instance.Name,
+		}
+		if err := ctx.Err(); err != nil {
+			return result, fmt.Errorf("deploy to %s: %w", target.Instance, err)
+		}
+
+		instanceResult, err := f.deployToInstance(ctx, workload, target, serviceAccount)
+		if err != nil {
+			return result, fmt.Errorf("deploy to %s: %w", target.Instance, err)
+		}
+		result.Instances = append(result.Instances, instanceResult)
 	}
+
+	return result, nil
+}
+
+func (f *Feature) deployToInstance(ctx context.Context, workload Workload, target Target, serviceAccount string) (result InstanceResult, resultErr error) {
 	fmt.Fprintf(f.progress, "%s / %s: connecting\n", workload.Name, target.Instance)
 	host, err := f.connector.Connect(ctx, target, serviceAccount)
 	if err != nil {
-		return Result{}, fmt.Errorf("connect to %s: %w", target.Instance, err)
+		return InstanceResult{}, fmt.Errorf("connect: %w", err)
 	}
-	defer host.Close()
+	defer func() {
+		closeErr := host.Close()
+		if closeErr == nil {
+			return
+		}
+		if resultErr != nil {
+			resultErr = fmt.Errorf("%w; close connection: %v", resultErr, closeErr)
+			return
+		}
+
+		result = InstanceResult{}
+		resultErr = fmt.Errorf("close connection: %w", closeErr)
+	}()
 
 	fmt.Fprintf(f.progress, "%s / %s: pulling %s\n", workload.Name, target.Instance, workload.Container.Image)
 	image, err := host.Pull(ctx, workload.Container.Image)
 	if err != nil {
-		return Result{}, fmt.Errorf("pull image %s: %w", workload.Container.Image, err)
+		return InstanceResult{}, fmt.Errorf("pull image %s: %w", workload.Container.Image, err)
 	}
 	spec := ContainerSpec{
 		Name:          workload.Name,
@@ -67,10 +102,10 @@ func (f *Feature) Deploy(ctx context.Context, filename, serviceAccount string) (
 
 	containers, err := host.WorkloadContainers(ctx, workload.Name)
 	if err != nil {
-		return Result{}, fmt.Errorf("find workload containers: %w", err)
+		return InstanceResult{}, fmt.Errorf("find workload containers: %w", err)
 	}
 	if len(containers) > 1 {
-		return Result{}, fmt.Errorf("workload %s has %d managed containers; refusing ambiguous state", workload.Name, len(containers))
+		return InstanceResult{}, fmt.Errorf("workload %s has %d managed containers; refusing ambiguous state", workload.Name, len(containers))
 	}
 	var previous *Container
 	var rollbackPrevious *Container
@@ -78,21 +113,21 @@ func (f *Feature) Deploy(ctx context.Context, filename, serviceAccount string) (
 		current := containers[0]
 		matches, err := host.Matches(ctx, current, spec)
 		if err != nil {
-			return Result{}, fmt.Errorf("compare current container: %w", err)
+			return InstanceResult{}, fmt.Errorf("compare current container: %w", err)
 		}
 		if matches && current.Running && current.Healthy {
 			fmt.Fprintf(f.progress, "%s / %s: current\n", workload.Name, target.Instance)
-			return Result{Workload: workload.Name, Instance: target.Instance, Container: current.ID}, nil
+			return InstanceResult{Zone: target.Zone, Instance: target.Instance, Container: current.ID}, nil
 		}
 		if matches && !current.Running {
 			if err := host.Start(ctx, current); err != nil {
-				return Result{}, fmt.Errorf("start current container: %w", err)
+				return InstanceResult{}, fmt.Errorf("start current container: %w", err)
 			}
 			if err := host.Verify(ctx, current); err != nil {
-				return Result{}, fmt.Errorf("verify current container: %w", err)
+				return InstanceResult{}, fmt.Errorf("verify current container: %w", err)
 			}
 
-			return Result{Workload: workload.Name, Instance: target.Instance, Container: current.ID, Changed: true}, nil
+			return InstanceResult{Zone: target.Zone, Instance: target.Instance, Container: current.ID, Changed: true}, nil
 		}
 		previous = &current
 		if current.Running {
@@ -102,29 +137,29 @@ func (f *Feature) Deploy(ctx context.Context, filename, serviceAccount string) (
 
 	container, err := host.Create(ctx, spec)
 	if err != nil {
-		return Result{}, fmt.Errorf("create replacement: %w", err)
+		return InstanceResult{}, fmt.Errorf("create replacement: %w", err)
 	}
 	if rollbackPrevious != nil {
 		if err := host.Stop(ctx, *rollbackPrevious); err != nil {
 			_ = host.Remove(context.WithoutCancel(ctx), container)
 
-			return Result{}, fmt.Errorf("stop current container: %w", err)
+			return InstanceResult{}, fmt.Errorf("stop current container: %w", err)
 		}
 	}
 	if err := host.Start(ctx, container); err != nil {
-		return Result{}, replacementFailure(ctx, host, container, rollbackPrevious, "start", err)
+		return InstanceResult{}, replacementFailure(ctx, host, container, rollbackPrevious, "start", err)
 	}
 	if err := host.Verify(ctx, container); err != nil {
-		return Result{}, replacementFailure(ctx, host, container, rollbackPrevious, "verify", err)
+		return InstanceResult{}, replacementFailure(ctx, host, container, rollbackPrevious, "verify", err)
 	}
 	if previous != nil {
 		if err := host.Remove(ctx, *previous); err != nil {
-			return Result{}, fmt.Errorf("remove previous container after successful replacement: %w", err)
+			return InstanceResult{}, fmt.Errorf("remove previous container after successful replacement: %w", err)
 		}
 	}
 
 	fmt.Fprintf(f.progress, "%s / %s: healthy\n", workload.Name, target.Instance)
-	return Result{Workload: workload.Name, Instance: target.Instance, Container: container.ID, Changed: true}, nil
+	return InstanceResult{Zone: target.Zone, Instance: target.Instance, Container: container.ID, Changed: true}, nil
 }
 
 func replacementFailure(ctx context.Context, host Host, replacement Container, previous *Container, phase string, cause error) error {

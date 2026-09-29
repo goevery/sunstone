@@ -43,15 +43,28 @@ func (*Adapter) Load(filename string) (deploy.Workload, error) {
 	if document.Name == "" || document.GCP.Project == "" || document.Container.Image == "" {
 		return deploy.Workload{}, errors.New("workload name, gcp.project, and container.image are required")
 	}
-	if len(document.GCP.Instances) != 1 || document.GCP.Instances[0].Name == "" || document.GCP.Instances[0].Zone == "" {
-		return deploy.Workload{}, errors.New("exactly one GCP instance with name and zone is required")
+	if len(document.GCP.Instances) == 0 {
+		return deploy.Workload{}, errors.New("at least one GCP instance is required")
 	}
-	instance := document.GCP.Instances[0]
+	instances := make([]deploy.Instance, len(document.GCP.Instances))
+	seen := make(map[deploy.Instance]struct{}, len(document.GCP.Instances))
+	for index, documentInstance := range document.GCP.Instances {
+		if documentInstance.Name == "" || documentInstance.Zone == "" {
+			return deploy.Workload{}, errors.New("every GCP instance must have a name and zone")
+		}
+		instance := deploy.Instance{Zone: documentInstance.Zone, Name: documentInstance.Name}
+		if _, exists := seen[instance]; exists {
+			return deploy.Workload{}, fmt.Errorf("duplicate GCP instance %s/%s", instance.Zone, instance.Name)
+		}
+		seen[instance] = struct{}{}
+		instances[index] = instance
+	}
+
 	return deploy.Workload{
 		Name: document.Name,
 		GCP: deploy.GCP{
 			Project:   document.GCP.Project,
-			Instances: []deploy.Instance{{Zone: instance.Zone, Name: instance.Name}},
+			Instances: instances,
 		},
 		Container: deploy.ContainerConfig{
 			Image:       document.Container.Image,
