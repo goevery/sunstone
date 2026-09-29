@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"net"
 	"slices"
 	"strings"
 	"time"
@@ -35,11 +34,10 @@ const (
 type host struct {
 	docker *client.Client
 	ssh    *ssh.Client
-	tunnel net.Conn
 }
 
 func (h *host) Close() error {
-	return errors.Join(h.docker.Close(), h.ssh.Close(), h.tunnel.Close())
+	return errors.Join(h.docker.Close(), h.ssh.Close())
 }
 
 func (h *host) Pull(ctx context.Context, reference string) (deploy.Image, error) {

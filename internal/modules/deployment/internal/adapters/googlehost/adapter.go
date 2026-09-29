@@ -153,7 +153,7 @@ func openHost(tunnel net.Conn, signer ssh.Signer, username, hostAlias string, ho
 		return nil, fmt.Errorf("create Docker client: %w", err)
 	}
 
-	return &host{docker: dockerClient, ssh: sshClient, tunnel: tunnel}, nil
+	return &host{docker: dockerClient, ssh: sshClient}, nil
 }
 
 func generateKey() (ssh.Signer, error) {
