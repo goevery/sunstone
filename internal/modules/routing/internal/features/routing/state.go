@@ -7,16 +7,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-
-	sunbeampb "github.com/goevery/sunstone/internal/gen/sunbeam/v1"
 )
 
 type stateDocument struct {
-	Version int              `json:"version"`
-	Route   *sunbeampb.Route `json:"route"`
+	Version int   `json:"version"`
+	Route   Route `json:"route"`
 }
 
-func loadState(path string) (*sunbeampb.Route, error) {
+func loadState(path string) (*Route, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -38,10 +36,10 @@ func loadState(path string) (*sunbeampb.Route, error) {
 	if document.Version != stateVersion {
 		return nil, fmt.Errorf("unsupported routing state version %d", document.Version)
 	}
-	return document.Route, nil
+	return &document.Route, nil
 }
 
-func persistState(path string, route *sunbeampb.Route) error {
+func persistState(path string, route Route) error {
 	directory := filepath.Dir(path)
 	temporary, err := os.CreateTemp(directory, ".sunbeam-state-*")
 	if err != nil {
@@ -70,18 +68,4 @@ func persistState(path string, route *sunbeampb.Route) error {
 	}
 	defer directoryFile.Close()
 	return directoryFile.Sync()
-}
-
-func cloneRoute(route *sunbeampb.Route) *sunbeampb.Route {
-	if route == nil {
-		return nil
-	}
-	return &sunbeampb.Route{
-		Name: route.GetName(),
-		Backend: &sunbeampb.Backend{
-			Address:          route.GetBackend().GetAddress(),
-			ContainerId:      route.GetBackend().GetContainerId(),
-			StartupProbePath: route.GetBackend().GetStartupProbePath(),
-		},
-	}
 }

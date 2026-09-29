@@ -7,8 +7,6 @@ import (
 	"net/url"
 	"sync"
 	"time"
-
-	sunbeampb "github.com/goevery/sunstone/internal/gen/sunbeam/v1"
 )
 
 type backend struct {
@@ -23,8 +21,8 @@ type backend struct {
 	drained  chan struct{}
 }
 
-func newBackend(route *sunbeampb.Route) *backend {
-	target := &url.URL{Scheme: "http", Host: route.GetBackend().GetAddress()}
+func newBackend(route Route) *backend {
+	target := &url.URL{Scheme: "http", Host: route.Backend.Address}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	ctx, cancel := context.WithCancel(context.Background())
 	result := &backend{transport: transport, ctx: ctx, cancel: cancel, drained: closedChannel()}

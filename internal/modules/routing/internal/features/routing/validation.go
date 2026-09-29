@@ -1,62 +1,55 @@
 package routing
 
 import (
-	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"regexp"
 	"slices"
 	"strings"
-
-	sunbeampb "github.com/goevery/sunstone/internal/gen/sunbeam/v1"
 )
 
 var routeIDPattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
-func validateRoute(route *sunbeampb.Route) error {
-	if err := validateRouteName(route); err != nil {
+func validateRoute(route Route) error {
+	if err := validateRouteName(route.Name); err != nil {
 		return err
 	}
-	candidate := route.GetBackend()
-	if candidate == nil || candidate.GetContainerId() == "" {
-		return errors.New("backend address, container_id, and startup_probe_path are required")
+	if route.Backend.ContainerID == "" {
+		return fmt.Errorf("%w: backend address, container_id, and startup_probe_path are required", ErrInvalidArgument)
 	}
-	host, _, err := net.SplitHostPort(candidate.GetAddress())
+	host, _, err := net.SplitHostPort(route.Backend.Address)
 	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
-		return errors.New("backend address must be a loopback IP and port")
+		return fmt.Errorf("%w: backend address must be a loopback IP and port", ErrInvalidArgument)
 	}
-	probe, err := url.ParseRequestURI(candidate.GetStartupProbePath())
-	if err != nil || !strings.HasPrefix(candidate.GetStartupProbePath(), "/") || probe.IsAbs() || probe.Host != "" || probe.Fragment != "" {
-		return errors.New("startup probe path must be an origin-form absolute path")
+	probe, err := url.ParseRequestURI(route.Backend.StartupProbePath)
+	if err != nil || !strings.HasPrefix(route.Backend.StartupProbePath, "/") || probe.IsAbs() || probe.Host != "" || probe.Fragment != "" {
+		return fmt.Errorf("%w: startup probe path must be an origin-form absolute path", ErrInvalidArgument)
 	}
 	return nil
 }
 
-func validateRouteName(route *sunbeampb.Route) error {
-	if route == nil {
-		return errors.New("route is required")
-	}
-	parts := strings.Split(route.GetName(), "/")
+func validateRouteName(name string) error {
+	parts := strings.Split(name, "/")
 	if len(parts) != 2 || parts[0] != "routes" || !routeIDPattern.MatchString(parts[1]) {
-		return errors.New("route name must have format routes/{route}")
+		return fmt.Errorf("%w: route name must have format routes/{route}", ErrInvalidArgument)
 	}
 	return nil
 }
 
-func applyUpdateMask(current, requested *sunbeampb.Route, paths []string) *sunbeampb.Route {
+func applyUpdateMask(current *Route, requested Route, paths []string) Route {
 	if current == nil || len(paths) == 0 || slices.Contains(paths, "*") || slices.Contains(paths, "backend") {
-		return cloneRoute(requested)
+		return requested
 	}
-	result := cloneRoute(current)
+	result := *current
 	for _, path := range paths {
 		switch path {
 		case "backend.address":
-			result.Backend.Address = requested.GetBackend().GetAddress()
+			result.Backend.Address = requested.Backend.Address
 		case "backend.container_id":
-			result.Backend.ContainerId = requested.GetBackend().GetContainerId()
+			result.Backend.ContainerID = requested.Backend.ContainerID
 		case "backend.startup_probe_path":
-			result.Backend.StartupProbePath = requested.GetBackend().GetStartupProbePath()
+			result.Backend.StartupProbePath = requested.Backend.StartupProbePath
 		}
 	}
 	return result
@@ -65,7 +58,7 @@ func applyUpdateMask(current, requested *sunbeampb.Route, paths []string) *sunbe
 func validateMask(paths []string) error {
 	for _, path := range paths {
 		if !slices.Contains([]string{"*", "backend", "backend.address", "backend.container_id", "backend.startup_probe_path"}, path) {
-			return fmt.Errorf("unsupported update_mask path %q", path)
+			return fmt.Errorf("%w: unsupported update_mask path %q", ErrInvalidArgument, path)
 		}
 	}
 	return nil
