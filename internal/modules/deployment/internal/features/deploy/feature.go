@@ -92,13 +92,14 @@ func (f *Feature) deployToInstance(ctx context.Context, workload Workload, targe
 		return InstanceResult{}, fmt.Errorf("pull image %s: %w", workload.Container.Image, err)
 	}
 	spec := ContainerSpec{
-		Name:          workload.Name,
-		Workload:      workload.Name,
-		Image:         image,
-		Command:       workload.Container.Command,
-		Environment:   workload.Container.Environment,
-		RestartPolicy: restartPolicy,
-		HTTP:          workload.HTTP,
+		Name:              workload.Name,
+		Workload:          workload.Name,
+		Image:             image,
+		Command:           workload.Container.Command,
+		Environment:       workload.Container.Environment,
+		SecretEnvironment: workload.Container.SecretEnvironment,
+		RestartPolicy:     restartPolicy,
+		HTTP:              workload.HTTP,
 	}
 
 	containers, err := host.WorkloadContainers(ctx, workload.Name)

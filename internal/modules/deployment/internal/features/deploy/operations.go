@@ -154,7 +154,7 @@ func (f *Feature) restartOnHost(ctx context.Context, host Host, workload Workloa
 		if err != nil {
 			return InstanceResult{}, fmt.Errorf("pull image %s: %w", workload.Container.Image, err)
 		}
-		spec := ContainerSpec{Name: workload.Name, Workload: workload.Name, Image: image, Command: workload.Container.Command, Environment: workload.Container.Environment, RestartPolicy: restartPolicy, HTTP: workload.HTTP}
+		spec := ContainerSpec{Name: workload.Name, Workload: workload.Name, Image: image, Command: workload.Container.Command, Environment: workload.Container.Environment, SecretEnvironment: workload.Container.SecretEnvironment, RestartPolicy: restartPolicy, HTTP: workload.HTTP}
 		replacement, err := host.Create(ctx, spec)
 		if err != nil {
 			return InstanceResult{}, fmt.Errorf("create replacement: %w", err)

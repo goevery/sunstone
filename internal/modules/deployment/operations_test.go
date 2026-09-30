@@ -93,6 +93,7 @@ func TestRestartMissingWorkloadStopsBeforeNextVM(t *testing.T) {
 
 func TestRestartHTTPWorkloadSwitchesToReplacementBeforeRemovingCurrent(t *testing.T) {
 	workload := backgroundWorkload()
+	workload.Container.SecretEnvironment = map[string]string{"API_KEY": "projects/p/secrets/key/versions/latest"}
 	workload.HTTP = &deploy.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
 	current := deploy.Container{ID: "old", Running: true, Healthy: true}
 	replacement := deploy.Container{ID: "new", Name: "web-new"}
@@ -101,7 +102,10 @@ func TestRestartHTTPWorkloadSwitchesToReplacementBeforeRemovingCurrent(t *testin
 		CloseFunc:              func() error { return nil },
 		WorkloadContainersFunc: func(context.Context, string) ([]deploy.Container, error) { return []deploy.Container{current}, nil },
 		PullFunc:               func(context.Context, string) (deploy.Image, error) { return deploy.Image{ID: "image"}, nil },
-		CreateFunc: func(context.Context, deploy.ContainerSpec) (deploy.Container, error) {
+		CreateFunc: func(_ context.Context, spec deploy.ContainerSpec) (deploy.Container, error) {
+			if spec.SecretEnvironment["API_KEY"] != "projects/p/secrets/key/versions/latest" {
+				t.Fatal("restart lost secret reference")
+			}
 			events = append(events, "create")
 			return replacement, nil
 		},

@@ -56,6 +56,8 @@ type ContainerConfig struct {
 	Image       string
 	Command     []string
 	Environment map[string]string
+	// SecretEnvironment contains normalized version references, never payloads.
+	SecretEnvironment map[string]string
 }
 
 // HTTPConfig selects HTTP deployment and describes its startup gate.
@@ -97,11 +99,12 @@ type Route struct {
 
 // ContainerSpec is the desired runtime configuration.
 type ContainerSpec struct {
-	Name          string
-	Workload      string
-	Image         Image
-	Command       []string
-	Environment   map[string]string
-	RestartPolicy string
-	HTTP          *HTTPConfig
+	Name              string
+	Workload          string
+	Image             Image
+	Command           []string
+	Environment       map[string]string
+	SecretEnvironment map[string]string
+	RestartPolicy     string
+	HTTP              *HTTPConfig
 }

@@ -15,7 +15,13 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-var routeIDPattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+var (
+	routeIDPattern         = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	environmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	secretNamePattern      = regexp.MustCompile(`^projects/[A-Za-z0-9-]+/secrets/[A-Za-z0-9_-]+$`)
+	secretIDPattern        = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	versionPattern         = regexp.MustCompile(`^([1-9][0-9]*|[A-Za-z][A-Za-z0-9_-]*)$`)
+)
 
 // Adapter loads the initial single-document YAML workload format.
 type Adapter struct{}
@@ -130,6 +136,11 @@ func (*Adapter) Load(filename string) (deploy.Workload, error) {
 		httpConfig = &deploy.HTTPConfig{ContainerPort: uint16(document.HTTP.ContainerPort), StartupProbePath: path}
 	}
 
+	literals, references, err := document.Container.Environment.resolve(document.GCP.Project)
+	if err != nil {
+		return deploy.Workload{}, err
+	}
+
 	return deploy.Workload{
 		Name: document.Name,
 		GCP: deploy.GCP{
@@ -137,9 +148,10 @@ func (*Adapter) Load(filename string) (deploy.Workload, error) {
 			Instances: instances,
 		},
 		Container: deploy.ContainerConfig{
-			Image:       document.Container.Image,
-			Command:     document.Container.Command,
-			Environment: map[string]string(document.Container.Environment),
+			Image:             document.Container.Image,
+			Command:           document.Container.Command,
+			Environment:       literals,
+			SecretEnvironment: references,
 		},
 		HTTP: httpConfig,
 	}, nil
@@ -181,21 +193,124 @@ type httpGetDocument struct {
 	Path string `yaml:"path"`
 }
 
-type strictEnvironment map[string]string
+type environmentEntry struct {
+	name       string
+	value      string
+	secretName string
+	version    string
+}
+
+type strictEnvironment []environmentEntry
 
 func (environment *strictEnvironment) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind != yaml.MappingNode {
-		return errors.New("container.env must be a mapping of string values")
+	var entries strictEnvironment
+	switch node.Kind {
+	case yaml.MappingNode:
+		for index := 0; index < len(node.Content); index += 2 {
+			key, value := node.Content[index], node.Content[index+1]
+			if key.Tag != "!!str" || value.Tag != "!!str" {
+				return errors.New("container.env keys and values must be strings")
+			}
+			entries = append(entries, environmentEntry{name: key.Value, value: value.Value})
+		}
+	case yaml.SequenceNode:
+		for _, item := range node.Content {
+			fields, err := environmentFields(item, "name", "value", "valueFrom")
+			if err != nil {
+				return err
+			}
+			name, err := environmentString(fields["name"])
+			if err != nil {
+				return err
+			}
+			entry := environmentEntry{name: name}
+			value, literal := fields["value"]
+			from, secret := fields["valueFrom"]
+			if literal == secret {
+				return errors.New("container.env entries require exactly one of value or valueFrom")
+			}
+			if literal {
+				entry.value, err = environmentString(value)
+			} else {
+				var source, reference map[string]*yaml.Node
+				source, err = environmentFields(from, "secretKeyRef")
+				if err == nil {
+					reference, err = environmentFields(source["secretKeyRef"], "name", "key")
+				}
+				if err == nil {
+					entry.secretName, err = environmentString(reference["name"])
+				}
+				if err == nil {
+					entry.version, err = environmentString(reference["key"])
+				}
+				if err == nil && (entry.secretName == "" || entry.version == "") {
+					err = errors.New("container.env secretKeyRef name and key are required")
+				}
+			}
+			if err != nil {
+				return err
+			}
+			entries = append(entries, entry)
+		}
+	default:
+		return errors.New("container.env must be a mapping or list")
 	}
-	result := make(strictEnvironment, len(node.Content)/2)
+	seen := make(map[string]bool)
+	for _, entry := range entries {
+		if !environmentNamePattern.MatchString(entry.name) || seen[entry.name] {
+			return errors.New("container.env contains an invalid or duplicate environment name")
+		}
+		seen[entry.name] = true
+	}
+	*environment = entries
+	return nil
+}
+
+func (environment strictEnvironment) resolve(project string) (map[string]string, map[string]string, error) {
+	var literals, references map[string]string
+	for _, entry := range environment {
+		if entry.secretName == "" && entry.version == "" {
+			if literals == nil {
+				literals = make(map[string]string)
+			}
+			literals[entry.name] = entry.value
+			continue
+		}
+		name := entry.secretName
+		if secretIDPattern.MatchString(name) {
+			name = "projects/" + project + "/secrets/" + name
+		}
+		if !secretNamePattern.MatchString(name) || !versionPattern.MatchString(entry.version) {
+			return nil, nil, errors.New("container.env secretKeyRef requires a valid secret name and explicit version key")
+		}
+		if references == nil {
+			references = make(map[string]string)
+		}
+		references[entry.name] = name + "/versions/" + entry.version
+	}
+	return literals, references, nil
+}
+
+// Custom YAML decoding must enforce known fields itself: Node.Decode does not
+// inherit the outer decoder's KnownFields setting.
+func environmentFields(node *yaml.Node, allowed ...string) (map[string]*yaml.Node, error) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil, errors.New("invalid container.env entry")
+	}
+	fields := make(map[string]*yaml.Node)
 	for index := 0; index < len(node.Content); index += 2 {
 		key := node.Content[index]
-		value := node.Content[index+1]
-		if key.Tag != "!!str" || value.Tag != "!!str" {
-			return fmt.Errorf("container.env key %q must have a string value", key.Value)
+		if key.Tag != "!!str" || !slices.Contains(allowed, key.Value) || fields[key.Value] != nil {
+			return nil, errors.New("container.env contains an unknown or duplicate field")
 		}
-		result[key.Value] = value.Value
+		fields[key.Value] = node.Content[index+1]
 	}
-	*environment = result
-	return nil
+	return fields, nil
+}
+
+func environmentString(node *yaml.Node) (string, error) {
+	if node == nil || node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+		return "", errors.New("container.env fields must be strings")
+	}
+	return node.Value, nil
 }

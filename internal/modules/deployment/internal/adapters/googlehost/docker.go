@@ -128,7 +128,18 @@ func (h *host) Matches(ctx context.Context, current deploy.Container, desired de
 		return false, nil
 	}
 
-	return inspected.Container.Image == desired.Image.ID &&
+	expectedRuntime := ""
+	if len(desired.SecretEnvironment) != 0 {
+		expectedRuntime = "sunray"
+		var actualReferences map[string]string
+		if err := json.Unmarshal([]byte(inspected.Container.HostConfig.Annotations["dev.sunstone.secret-env"]), &actualReferences); err != nil || !maps.Equal(actualReferences, desired.SecretEnvironment) {
+			return false, nil
+		}
+	}
+	actualRuntime := inspected.Container.HostConfig.Runtime
+	runtimeMatches := actualRuntime == expectedRuntime || (expectedRuntime == "" && actualRuntime != "sunray")
+
+	return runtimeMatches && inspected.Container.Image == desired.Image.ID &&
 		slices.Equal(inspected.Container.Config.Cmd, expectedCommand) &&
 		maps.Equal(actualEnvironment, expectedEnvironment) &&
 		string(inspected.Container.HostConfig.RestartPolicy.Name) == desired.RestartPolicy &&
@@ -291,6 +302,11 @@ func containerCreateOptions(spec deploy.ContainerSpec, name, fingerprint string)
 	hostConfig := &container.HostConfig{
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(spec.RestartPolicy)},
 	}
+	if len(spec.SecretEnvironment) != 0 {
+		references, _ := json.Marshal(spec.SecretEnvironment) // A string map is always JSON-encodable.
+		hostConfig.Runtime = "sunray"
+		hostConfig.Annotations = map[string]string{"dev.sunstone.secret-env": string(references)}
+	}
 	var networkingConfig *network.NetworkingConfig
 	if spec.HTTP != nil {
 		port := network.MustParsePort(fmt.Sprintf("%d/tcp", spec.HTTP.ContainerPort))
@@ -321,18 +337,27 @@ func configurationFingerprint(spec deploy.ContainerSpec) (string, error) {
 		networkName = workloadNetwork
 	}
 	encoded, err := json.Marshal(struct {
-		Image         string
-		Command       []string
-		Environment   map[string]string
-		RestartPolicy string
-		HTTP          *deploy.HTTPConfig `json:",omitempty"`
-		Network       string             `json:",omitempty"`
-	}{spec.Image.ID, spec.Command, spec.Environment, spec.RestartPolicy, spec.HTTP, networkName})
+		Image             string
+		Command           []string
+		Environment       map[string]string
+		RestartPolicy     string
+		HTTP              *deploy.HTTPConfig `json:",omitempty"`
+		Network           string             `json:",omitempty"`
+		SecretEnvironment map[string]string  `json:",omitempty"`
+		Runtime           string             `json:",omitempty"`
+	}{spec.Image.ID, spec.Command, spec.Environment, spec.RestartPolicy, spec.HTTP, networkName, spec.SecretEnvironment, secretRuntime(spec)})
 	if err != nil {
 		return "", fmt.Errorf("encode container configuration: %w", err)
 	}
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:]), nil
+}
+
+func secretRuntime(spec deploy.ContainerSpec) string {
+	if len(spec.SecretEnvironment) != 0 {
+		return "sunray"
+	}
+	return ""
 }
 
 func environmentMap(environment []string) map[string]string {
