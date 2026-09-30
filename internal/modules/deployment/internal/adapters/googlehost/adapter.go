@@ -46,7 +46,10 @@ type loginKey struct {
 type loginIdentity struct {
 	tokenSource oauth2.TokenSource
 	compute     *compute.Service
-	username    string
+
+	loginOnce sync.Once
+	username  string
+	loginErr  error
 }
 
 // Adapter connects to private Compute Engine VMs using OS Login, IAP, and SSH.
@@ -55,7 +58,7 @@ type Adapter struct {
 	signer         ssh.Signer
 
 	mu         sync.Mutex
-	identities map[loginKey]loginIdentity
+	identities map[loginKey]*loginIdentity
 }
 
 // New constructs a Google host adapter using the operator's home directory.
@@ -73,19 +76,29 @@ func New() (*Adapter, error) {
 	return &Adapter{
 		knownHostsPath: filepath.Join(home, ".ssh", "google_compute_known_hosts"),
 		signer:         signer,
-		identities:     make(map[loginKey]loginIdentity),
+		identities:     make(map[loginKey]*loginIdentity),
 	}, nil
 }
 
 // Connect opens a Docker API client through an authenticated SSH connection.
 func (a *Adapter) Connect(ctx context.Context, target deploy.Target, serviceAccount string) (deploy.Host, error) {
-	identity, err := a.login(ctx, target.Project, serviceAccount, prepareLogin)
+	identity, err := a.credentials(ctx, target.Project, serviceAccount, prepareCredentials)
 	if err != nil {
 		return nil, err
 	}
-	instance, err := identity.compute.Instances.Get(target.Project, target.Zone, target.Instance).Context(ctx).Do()
+	instance, err := prepareTarget(
+		ctx,
+		identity,
+		a.signer,
+		target.Project,
+		serviceAccount,
+		func() (*compute.Instance, error) {
+			return identity.compute.Instances.Get(target.Project, target.Zone, target.Instance).Context(ctx).Do()
+		},
+		importLoginKey,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("get VM: %w", err)
+		return nil, err
 	}
 	if instance.Id == 0 {
 		return nil, errors.New("Compute Engine returned an empty VM instance ID")
@@ -116,38 +129,57 @@ func (a *Adapter) Connect(ctx context.Context, target deploy.Target, serviceAcco
 	})
 }
 
-func (a *Adapter) login(ctx context.Context, project, serviceAccount string, prepare func(context.Context, ssh.Signer, string, string) (loginIdentity, error)) (loginIdentity, error) {
+func (a *Adapter) credentials(ctx context.Context, project, serviceAccount string, prepare func(context.Context, string) (*loginIdentity, error)) (*loginIdentity, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	key := loginKey{project: project, serviceAccount: serviceAccount}
 	if identity, ok := a.identities[key]; ok {
 		return identity, nil
 	}
-	identity, err := prepare(ctx, a.signer, project, serviceAccount)
+	identity, err := prepare(ctx, serviceAccount)
 	if err != nil {
-		return loginIdentity{}, err
+		return nil, err
 	}
 	a.identities[key] = identity
 	return identity, nil
 }
 
-func prepareLogin(ctx context.Context, signer ssh.Signer, project, serviceAccount string) (loginIdentity, error) {
+func (identity *loginIdentity) login(ctx context.Context, signer ssh.Signer, project, serviceAccount string, importKey func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error)) error {
+	identity.loginOnce.Do(func() {
+		identity.username, identity.loginErr = importKey(ctx, identity.tokenSource, signer, project, serviceAccount)
+	})
+	return identity.loginErr
+}
+
+func prepareTarget(ctx context.Context, identity *loginIdentity, signer ssh.Signer, project, serviceAccount string, lookup func() (*compute.Instance, error), importKey func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error)) (*compute.Instance, error) {
+	loginDone := make(chan error, 1)
+	go func() {
+		loginDone <- identity.login(ctx, signer, project, serviceAccount, importKey)
+	}()
+	instance, instanceErr := lookup()
+	loginErr := <-loginDone
+	if loginErr != nil {
+		return nil, loginErr
+	}
+	if instanceErr != nil {
+		return nil, fmt.Errorf("get VM: %w", instanceErr)
+	}
+	return instance, nil
+}
+
+func prepareCredentials(ctx context.Context, serviceAccount string) (*loginIdentity, error) {
 	tokenSource, err := impersonate.CredentialsTokenSource(ctx, impersonate.CredentialsConfig{
 		TargetPrincipal: serviceAccount,
 		Scopes:          []string{compute.CloudPlatformScope},
 	})
 	if err != nil {
-		return loginIdentity{}, fmt.Errorf("impersonate service account %s: %w", serviceAccount, err)
+		return nil, fmt.Errorf("impersonate service account %s: %w", serviceAccount, err)
 	}
 	computeClient, err := compute.NewService(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
-		return loginIdentity{}, fmt.Errorf("create Compute Engine client: %w", err)
+		return nil, fmt.Errorf("create Compute Engine client: %w", err)
 	}
-	username, err := importLoginKey(ctx, tokenSource, signer, project, serviceAccount)
-	if err != nil {
-		return loginIdentity{}, err
-	}
-	return loginIdentity{tokenSource: tokenSource, compute: computeClient, username: username}, nil
+	return &loginIdentity{tokenSource: tokenSource, compute: computeClient}, nil
 }
 
 func retrySSHAuthentication(ctx context.Context, connect func() (*host, error)) (*host, error) {

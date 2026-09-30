@@ -8,10 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/goevery/sunstone/internal/modules/deployment/internal/features/deploy"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"golang.org/x/oauth2"
+	"google.golang.org/api/compute/v1"
 )
 
 func TestReusesOneLoginIdentityAcrossTargetConnections(t *testing.T) {
@@ -19,26 +22,73 @@ func TestReusesOneLoginIdentityAcrossTargetConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapter := &Adapter{signer: signer, identities: make(map[loginKey]loginIdentity)}
+	adapter := &Adapter{signer: signer, identities: make(map[loginKey]*loginIdentity)}
 	prepared := 0
-	prepare := func(_ context.Context, gotSigner ssh.Signer, project, serviceAccount string) (loginIdentity, error) {
+	prepare := func(_ context.Context, serviceAccount string) (*loginIdentity, error) {
 		prepared++
-		if string(gotSigner.PublicKey().Marshal()) != string(signer.PublicKey().Marshal()) || project != "acme-prod" || serviceAccount != "operator@example.com" {
-			t.Fatalf("prepare login arguments are incorrect")
+		if serviceAccount != "operator@example.com" {
+			t.Fatalf("service account = %q", serviceAccount)
 		}
-		return loginIdentity{username: "operator"}, nil
+		return &loginIdentity{}, nil
 	}
 
-	first, err := adapter.login(t.Context(), "acme-prod", "operator@example.com", prepare)
+	first, err := adapter.credentials(t.Context(), "acme-prod", "operator@example.com", prepare)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := adapter.login(t.Context(), "acme-prod", "operator@example.com", prepare)
+	second, err := adapter.credentials(t.Context(), "acme-prod", "operator@example.com", prepare)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared != 1 || first.username != second.username {
-		t.Fatalf("prepared = %d, identities = %+v, %+v", prepared, first, second)
+	imports := 0
+	importKey := func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error) {
+		imports++
+		return "operator", nil
+	}
+	if err := first.login(t.Context(), signer, "acme-prod", "operator@example.com", importKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.login(t.Context(), signer, "acme-prod", "operator@example.com", importKey); err != nil {
+		t.Fatal(err)
+	}
+	if prepared != 1 || imports != 1 || first != second || first.username != "operator" {
+		t.Fatalf("prepared = %d, imports = %d, identities = %p, %p", prepared, imports, first, second)
+	}
+}
+
+func TestComputeLookupRunsWhileOSLoginKeyImports(t *testing.T) {
+	importStarted := make(chan struct{})
+	releaseImport := make(chan struct{})
+	lookupStarted := make(chan struct{})
+	identity := &loginIdentity{}
+	importKey := func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error) {
+		close(importStarted)
+		<-releaseImport
+		return "operator", nil
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := prepareTarget(
+			t.Context(), identity, nil, "acme-prod", "operator@example.com",
+			func() (*compute.Instance, error) {
+				close(lookupStarted)
+				return &compute.Instance{Id: 1}, nil
+			},
+			importKey,
+		)
+		result <- err
+	}()
+
+	for name, started := range map[string]<-chan struct{}{"OS Login import": importStarted, "Compute lookup": lookupStarted} {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatalf("%s did not start concurrently", name)
+		}
+	}
+	close(releaseImport)
+	if err := <-result; err != nil {
+		t.Fatal(err)
 	}
 }
 
