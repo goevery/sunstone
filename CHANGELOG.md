@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.0](https://github.com/goevery/sunstone/compare/v1.0.0...v1.1.0) (2026-09-30)
+
+
+### Features
+
+* deploy HTTP workloads across VMs ([a3bc389](https://github.com/goevery/sunstone/commit/a3bc389897cc3a2ac8d1c00f515b60a0ab7dc187))
+* operate deployed workloads ([1bbf7ae](https://github.com/goevery/sunstone/commit/1bbf7aebc971c33d9ee08d0a781f7d9ffb6898a0))
+
+
+### Bug Fixes
+
+* reuse ephemeral SSH credentials ([19f8cb7](https://github.com/goevery/sunstone/commit/19f8cb77268e836531adef928b85cecdcb3605e6))
+
+
+### Performance Improvements
+
+* overlap VM lookup with OS Login ([45d1e29](https://github.com/goevery/sunstone/commit/45d1e29625ae380c8614d6ea8b5bfb2f72ce7e9c))
+
 ## 1.0.0 (2026-09-29)
 
 
