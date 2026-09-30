@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	oslogin "cloud.google.com/go/oslogin/apiv1"
@@ -28,11 +29,33 @@ import (
 	"google.golang.org/api/option"
 )
 
-const sshKeyLifetime = 15 * time.Minute
+const (
+	sshKeyLifetime                  = 15 * time.Minute
+	sshAuthenticationAttempts       = 6
+	sshAuthenticationInitialBackoff = 250 * time.Millisecond
+	sshAuthenticationMaximumBackoff = 2 * time.Second
+)
+
+var errSSHAuthentication = errors.New("SSH authentication rejected")
+
+type loginKey struct {
+	project        string
+	serviceAccount string
+}
+
+type loginIdentity struct {
+	tokenSource oauth2.TokenSource
+	compute     *compute.Service
+	username    string
+}
 
 // Adapter connects to private Compute Engine VMs using OS Login, IAP, and SSH.
 type Adapter struct {
 	knownHostsPath string
+	signer         ssh.Signer
+
+	mu         sync.Mutex
+	identities map[loginKey]loginIdentity
 }
 
 // New constructs a Google host adapter using the operator's home directory.
@@ -42,27 +65,25 @@ func New() (*Adapter, error) {
 		return nil, fmt.Errorf("find home directory for SSH known hosts: %v", err)
 	}
 
-	return &Adapter{knownHostsPath: filepath.Join(home, ".ssh", "google_compute_known_hosts")}, nil
-}
-
-// Connect opens a Docker API client through an authenticated SSH connection.
-func (a *Adapter) Connect(ctx context.Context, target deploy.Target, serviceAccount string) (deploy.Host, error) {
-	tokenSource, err := impersonate.CredentialsTokenSource(ctx, impersonate.CredentialsConfig{
-		TargetPrincipal: serviceAccount,
-		Scopes:          []string{compute.CloudPlatformScope},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("impersonate service account %s: %w", serviceAccount, err)
-	}
 	signer, err := generateKey()
 	if err != nil {
 		return nil, err
 	}
-	computeClient, err := compute.NewService(ctx, option.WithTokenSource(tokenSource))
+
+	return &Adapter{
+		knownHostsPath: filepath.Join(home, ".ssh", "google_compute_known_hosts"),
+		signer:         signer,
+		identities:     make(map[loginKey]loginIdentity),
+	}, nil
+}
+
+// Connect opens a Docker API client through an authenticated SSH connection.
+func (a *Adapter) Connect(ctx context.Context, target deploy.Target, serviceAccount string) (deploy.Host, error) {
+	identity, err := a.login(ctx, target.Project, serviceAccount, prepareLogin)
 	if err != nil {
-		return nil, fmt.Errorf("create Compute Engine client: %w", err)
+		return nil, err
 	}
-	instance, err := computeClient.Instances.Get(target.Project, target.Zone, target.Instance).Context(ctx).Do()
+	instance, err := identity.compute.Instances.Get(target.Project, target.Zone, target.Instance).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("get VM: %w", err)
 	}
@@ -70,32 +91,81 @@ func (a *Adapter) Connect(ctx context.Context, target deploy.Target, serviceAcco
 		return nil, errors.New("Compute Engine returned an empty VM instance ID")
 	}
 
-	username, err := importLoginKey(ctx, tokenSource, signer, target.Project, serviceAccount)
-	if err != nil {
-		return nil, err
-	}
 	hostAlias := sshHostAlias(instance.Id)
 	hostKeyCallback, err := tofuHostKeyCallback(a.knownHostsPath)
 	if err != nil {
 		return nil, err
 	}
-	tunnel, err := iap.Dial(ctx,
-		iap.WithProject(target.Project),
-		iap.WithInstance(target.Instance, target.Zone, "nic0"),
-		iap.WithPort("22"),
-		iap.WithTokenSource(&tokenSource),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("open IAP tunnel: %w", err)
-	}
+	return retrySSHAuthentication(ctx, func() (*host, error) {
+		tokenSource := identity.tokenSource
+		tunnel, err := iap.Dial(ctx,
+			iap.WithProject(target.Project),
+			iap.WithInstance(target.Instance, target.Zone, "nic0"),
+			iap.WithPort("22"),
+			iap.WithTokenSource(&tokenSource),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("open IAP tunnel: %w", err)
+		}
+		connected, err := openHost(tunnel, a.signer, identity.username, hostAlias, hostKeyCallback)
+		if err != nil {
+			tunnel.Close()
+			return nil, err
+		}
+		return connected, nil
+	})
+}
 
-	host, err := openHost(tunnel, signer, username, hostAlias, hostKeyCallback)
-	if err != nil {
-		tunnel.Close()
-		return nil, err
+func (a *Adapter) login(ctx context.Context, project, serviceAccount string, prepare func(context.Context, ssh.Signer, string, string) (loginIdentity, error)) (loginIdentity, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := loginKey{project: project, serviceAccount: serviceAccount}
+	if identity, ok := a.identities[key]; ok {
+		return identity, nil
 	}
+	identity, err := prepare(ctx, a.signer, project, serviceAccount)
+	if err != nil {
+		return loginIdentity{}, err
+	}
+	a.identities[key] = identity
+	return identity, nil
+}
 
-	return host, nil
+func prepareLogin(ctx context.Context, signer ssh.Signer, project, serviceAccount string) (loginIdentity, error) {
+	tokenSource, err := impersonate.CredentialsTokenSource(ctx, impersonate.CredentialsConfig{
+		TargetPrincipal: serviceAccount,
+		Scopes:          []string{compute.CloudPlatformScope},
+	})
+	if err != nil {
+		return loginIdentity{}, fmt.Errorf("impersonate service account %s: %w", serviceAccount, err)
+	}
+	computeClient, err := compute.NewService(ctx, option.WithTokenSource(tokenSource))
+	if err != nil {
+		return loginIdentity{}, fmt.Errorf("create Compute Engine client: %w", err)
+	}
+	username, err := importLoginKey(ctx, tokenSource, signer, project, serviceAccount)
+	if err != nil {
+		return loginIdentity{}, err
+	}
+	return loginIdentity{tokenSource: tokenSource, compute: computeClient, username: username}, nil
+}
+
+func retrySSHAuthentication(ctx context.Context, connect func() (*host, error)) (*host, error) {
+	backoff := sshAuthenticationInitialBackoff
+	for attempt := 1; ; attempt++ {
+		connected, err := connect()
+		if err == nil || !errors.Is(err, errSSHAuthentication) || attempt == sshAuthenticationAttempts {
+			return connected, err
+		}
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+		backoff = min(backoff*2, sshAuthenticationMaximumBackoff)
+	}
 }
 
 func importLoginKey(ctx context.Context, tokenSource oauth2.TokenSource, signer ssh.Signer, project, user string) (string, error) {
@@ -137,6 +207,9 @@ func openHost(tunnel net.Conn, signer ssh.Signer, username, hostAlias string, ho
 		HostKeyAlgorithms: []string{ssh.KeyAlgoED25519},
 	})
 	if err != nil {
+		if strings.Contains(err.Error(), "ssh: unable to authenticate") {
+			return nil, fmt.Errorf("%w: %v", errSSHAuthentication, err)
+		}
 		return nil, fmt.Errorf("SSH handshake: %w", err)
 	}
 	sshClient := ssh.NewClient(connection, channels, requests)

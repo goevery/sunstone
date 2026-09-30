@@ -1,15 +1,72 @@
 package googlehost
 
 import (
+	"context"
 	"crypto/rand"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/goevery/sunstone/internal/modules/deployment/internal/features/deploy"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+func TestReusesOneLoginIdentityAcrossTargetConnections(t *testing.T) {
+	signer, err := generateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &Adapter{signer: signer, identities: make(map[loginKey]loginIdentity)}
+	prepared := 0
+	prepare := func(_ context.Context, gotSigner ssh.Signer, project, serviceAccount string) (loginIdentity, error) {
+		prepared++
+		if string(gotSigner.PublicKey().Marshal()) != string(signer.PublicKey().Marshal()) || project != "acme-prod" || serviceAccount != "operator@example.com" {
+			t.Fatalf("prepare login arguments are incorrect")
+		}
+		return loginIdentity{username: "operator"}, nil
+	}
+
+	first, err := adapter.login(t.Context(), "acme-prod", "operator@example.com", prepare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := adapter.login(t.Context(), "acme-prod", "operator@example.com", prepare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared != 1 || first.username != second.username {
+		t.Fatalf("prepared = %d, identities = %+v, %+v", prepared, first, second)
+	}
+}
+
+func TestRetriesAuthenticationWithPreparedIdentity(t *testing.T) {
+	attempts := 0
+	connected, err := retrySSHAuthentication(t.Context(), func() (*host, error) {
+		attempts++
+		if attempts < 2 {
+			return nil, errSSHAuthentication
+		}
+		return &host{}, nil
+	})
+	if err != nil || connected == nil || attempts != 2 {
+		t.Fatalf("connected = %v, attempts = %d, error = %v", connected, attempts, err)
+	}
+}
+
+func TestDoesNotRetryNonAuthenticationFailure(t *testing.T) {
+	attempts := 0
+	failure := errors.New("host key changed")
+	_, err := retrySSHAuthentication(t.Context(), func() (*host, error) {
+		attempts++
+		return nil, failure
+	})
+	if !errors.Is(err, failure) || attempts != 1 {
+		t.Fatalf("attempts = %d, error = %v", attempts, err)
+	}
+}
 
 func TestGeneratesUsableEphemeralKey(t *testing.T) {
 	signer, err := generateKey()
