@@ -24,6 +24,9 @@ var _ deploy.Loader = &mockLoader{}
 //			LoadFunc: func(s string) (deploy.Workload, error) {
 //				panic("mock out the Load method")
 //			},
+//			LoadAllFunc: func(strings []string) ([]deploy.Workload, error) {
+//				panic("mock out the LoadAll method")
+//			},
 //		}
 //
 //		// use mockedLoader in code that requires deploy.Loader
@@ -34,6 +37,9 @@ type mockLoader struct {
 	// LoadFunc mocks the Load method.
 	LoadFunc func(s string) (deploy.Workload, error)
 
+	// LoadAllFunc mocks the LoadAll method.
+	LoadAllFunc func(strings []string) ([]deploy.Workload, error)
+
 	// calls tracks calls to the methods.
 	calls struct {
 		// Load holds details about calls to the Load method.
@@ -41,8 +47,14 @@ type mockLoader struct {
 			// S is the s argument value.
 			S string
 		}
+		// LoadAll holds details about calls to the LoadAll method.
+		LoadAll []struct {
+			// Strings is the strings argument value.
+			Strings []string
+		}
 	}
-	lockLoad sync.RWMutex
+	lockLoad    sync.RWMutex
+	lockLoadAll sync.RWMutex
 }
 
 // Load calls LoadFunc.
@@ -74,6 +86,38 @@ func (mock *mockLoader) LoadCalls() []struct {
 	mock.lockLoad.RLock()
 	calls = mock.calls.Load
 	mock.lockLoad.RUnlock()
+	return calls
+}
+
+// LoadAll calls LoadAllFunc.
+func (mock *mockLoader) LoadAll(strings []string) ([]deploy.Workload, error) {
+	if mock.LoadAllFunc == nil {
+		panic("mockLoader.LoadAllFunc: method is nil but Loader.LoadAll was just called")
+	}
+	callInfo := struct {
+		Strings []string
+	}{
+		Strings: strings,
+	}
+	mock.lockLoadAll.Lock()
+	mock.calls.LoadAll = append(mock.calls.LoadAll, callInfo)
+	mock.lockLoadAll.Unlock()
+	return mock.LoadAllFunc(strings)
+}
+
+// LoadAllCalls gets all the calls that were made to LoadAll.
+// Check the length with:
+//
+//	len(mockedLoader.LoadAllCalls())
+func (mock *mockLoader) LoadAllCalls() []struct {
+	Strings []string
+} {
+	var calls []struct {
+		Strings []string
+	}
+	mock.lockLoadAll.RLock()
+	calls = mock.calls.LoadAll
+	mock.lockLoadAll.RUnlock()
 	return calls
 }
 
@@ -174,6 +218,9 @@ var _ deploy.Host = &mockHost{}
 //			CreateFunc: func(context1 context.Context, containerSpec deploy.ContainerSpec) (deploy.Container, error) {
 //				panic("mock out the Create method")
 //			},
+//			DeleteRouteFunc: func(context1 context.Context, s string, b bool) error {
+//				panic("mock out the DeleteRoute method")
+//			},
 //			LogsFunc: func(context1 context.Context, container deploy.Container) (string, error) {
 //				panic("mock out the Logs method")
 //			},
@@ -219,6 +266,9 @@ type mockHost struct {
 
 	// CreateFunc mocks the Create method.
 	CreateFunc func(context1 context.Context, containerSpec deploy.ContainerSpec) (deploy.Container, error)
+
+	// DeleteRouteFunc mocks the DeleteRoute method.
+	DeleteRouteFunc func(context1 context.Context, s string, b bool) error
 
 	// LogsFunc mocks the Logs method.
 	LogsFunc func(context1 context.Context, container deploy.Container) (string, error)
@@ -270,6 +320,15 @@ type mockHost struct {
 			Context1 context.Context
 			// ContainerSpec is the containerSpec argument value.
 			ContainerSpec deploy.ContainerSpec
+		}
+		// DeleteRoute holds details about calls to the DeleteRoute method.
+		DeleteRoute []struct {
+			// Context1 is the context1 argument value.
+			Context1 context.Context
+			// S is the s argument value.
+			S string
+			// B is the b argument value.
+			B bool
 		}
 		// Logs holds details about calls to the Logs method.
 		Logs []struct {
@@ -347,6 +406,7 @@ type mockHost struct {
 	lockBackendAddress     sync.RWMutex
 	lockClose              sync.RWMutex
 	lockCreate             sync.RWMutex
+	lockDeleteRoute        sync.RWMutex
 	lockLogs               sync.RWMutex
 	lockMatches            sync.RWMutex
 	lockPull               sync.RWMutex
@@ -459,6 +519,46 @@ func (mock *mockHost) CreateCalls() []struct {
 	mock.lockCreate.RLock()
 	calls = mock.calls.Create
 	mock.lockCreate.RUnlock()
+	return calls
+}
+
+// DeleteRoute calls DeleteRouteFunc.
+func (mock *mockHost) DeleteRoute(context1 context.Context, s string, b bool) error {
+	if mock.DeleteRouteFunc == nil {
+		panic("mockHost.DeleteRouteFunc: method is nil but Host.DeleteRoute was just called")
+	}
+	callInfo := struct {
+		Context1 context.Context
+		S        string
+		B        bool
+	}{
+		Context1: context1,
+		S:        s,
+		B:        b,
+	}
+	mock.lockDeleteRoute.Lock()
+	mock.calls.DeleteRoute = append(mock.calls.DeleteRoute, callInfo)
+	mock.lockDeleteRoute.Unlock()
+	return mock.DeleteRouteFunc(context1, s, b)
+}
+
+// DeleteRouteCalls gets all the calls that were made to DeleteRoute.
+// Check the length with:
+//
+//	len(mockedHost.DeleteRouteCalls())
+func (mock *mockHost) DeleteRouteCalls() []struct {
+	Context1 context.Context
+	S        string
+	B        bool
+} {
+	var calls []struct {
+		Context1 context.Context
+		S        string
+		B        bool
+	}
+	mock.lockDeleteRoute.RLock()
+	calls = mock.calls.DeleteRoute
+	mock.lockDeleteRoute.RUnlock()
 	return calls
 }
 

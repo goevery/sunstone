@@ -6,7 +6,10 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/goevery/sunstone/internal/modules/deployment/internal/features/deploy"
 	"go.yaml.in/yaml/v3"
@@ -20,6 +23,50 @@ type Adapter struct{}
 // New constructs a YAML workload adapter.
 func New() *Adapter {
 	return &Adapter{}
+}
+
+// LoadAll discovers and loads workload files in input order and directory lexical order.
+func (adapter *Adapter) LoadAll(paths []string) ([]deploy.Workload, error) {
+	var filenames []string
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("inspect workload path %s: %w", path, err)
+		}
+		if !info.IsDir() {
+			filenames = append(filenames, path)
+			continue
+		}
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return nil, fmt.Errorf("read workload directory %s: %w", path, err)
+		}
+		directoryFiles := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			extension := strings.ToLower(filepath.Ext(entry.Name()))
+			if extension == ".yaml" || extension == ".yml" {
+				directoryFiles = append(directoryFiles, filepath.Join(path, entry.Name()))
+			}
+		}
+		slices.Sort(directoryFiles)
+		filenames = append(filenames, directoryFiles...)
+	}
+	if len(filenames) == 0 {
+		return nil, errors.New("no workload files found")
+	}
+
+	workloads := make([]deploy.Workload, len(filenames))
+	for index, filename := range filenames {
+		workload, err := adapter.Load(filename)
+		if err != nil {
+			return nil, fmt.Errorf("load %s: %w", filename, err)
+		}
+		workloads[index] = workload
+	}
+	return workloads, nil
 }
 
 // Load decodes and validates one workload from filename.

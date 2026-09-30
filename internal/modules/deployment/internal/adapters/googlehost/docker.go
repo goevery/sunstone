@@ -95,6 +95,7 @@ func (h *host) WorkloadContainers(ctx context.Context, workload string) ([]deplo
 		containers = append(containers, deploy.Container{
 			ID:      item.ID,
 			Name:    name,
+			Image:   item.ImageID,
 			Running: item.State == container.StateRunning,
 			Healthy: healthy,
 		})
@@ -186,6 +187,14 @@ func (h *host) UpdateRoute(ctx context.Context, route deploy.Route) error {
 			},
 		},
 		AllowMissing: true,
+	}))
+	return err
+}
+
+func (h *host) DeleteRoute(ctx context.Context, workload string, allowMissing bool) error {
+	_, err := h.routes.DeleteRoute(ctx, connect.NewRequest(&sunbeampb.DeleteRouteRequest{
+		Name:         "routes/" + workload,
+		AllowMissing: allowMissing,
 	}))
 	return err
 }

@@ -9,6 +9,7 @@ import (
 	context "context"
 	errors "errors"
 	v1 "github.com/goevery/sunstone/internal/gen/sunbeam/v1"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	http "net/http"
 	strings "strings"
 )
@@ -39,6 +40,8 @@ const (
 	SunbeamListRoutesProcedure = "/sunstone.sunbeam.v1.Sunbeam/ListRoutes"
 	// SunbeamUpdateRouteProcedure is the fully-qualified name of the Sunbeam's UpdateRoute RPC.
 	SunbeamUpdateRouteProcedure = "/sunstone.sunbeam.v1.Sunbeam/UpdateRoute"
+	// SunbeamDeleteRouteProcedure is the fully-qualified name of the Sunbeam's DeleteRoute RPC.
+	SunbeamDeleteRouteProcedure = "/sunstone.sunbeam.v1.Sunbeam/DeleteRoute"
 )
 
 // SunbeamClient is a client for the sunstone.sunbeam.v1.Sunbeam service.
@@ -49,6 +52,8 @@ type SunbeamClient interface {
 	ListRoutes(context.Context, *connect.Request[v1.ListRoutesRequest]) (*connect.Response[v1.ListRoutesResponse], error)
 	// Updates a route after its candidate backend becomes ready.
 	UpdateRoute(context.Context, *connect.Request[v1.UpdateRouteRequest]) (*connect.Response[v1.Route], error)
+	// Deletes a route after draining its active requests.
+	DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[emptypb.Empty], error)
 }
 
 // NewSunbeamClient constructs a client for the sunstone.sunbeam.v1.Sunbeam service. By default, it
@@ -80,6 +85,12 @@ func NewSunbeamClient(httpClient connect.HTTPClient, baseURL string, opts ...con
 			connect.WithSchema(sunbeamMethods.ByName("UpdateRoute")),
 			connect.WithClientOptions(opts...),
 		),
+		deleteRoute: connect.NewClient[v1.DeleteRouteRequest, emptypb.Empty](
+			httpClient,
+			baseURL+SunbeamDeleteRouteProcedure,
+			connect.WithSchema(sunbeamMethods.ByName("DeleteRoute")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -88,6 +99,7 @@ type sunbeamClient struct {
 	getRoute    *connect.Client[v1.GetRouteRequest, v1.Route]
 	listRoutes  *connect.Client[v1.ListRoutesRequest, v1.ListRoutesResponse]
 	updateRoute *connect.Client[v1.UpdateRouteRequest, v1.Route]
+	deleteRoute *connect.Client[v1.DeleteRouteRequest, emptypb.Empty]
 }
 
 // GetRoute calls sunstone.sunbeam.v1.Sunbeam.GetRoute.
@@ -105,6 +117,11 @@ func (c *sunbeamClient) UpdateRoute(ctx context.Context, req *connect.Request[v1
 	return c.updateRoute.CallUnary(ctx, req)
 }
 
+// DeleteRoute calls sunstone.sunbeam.v1.Sunbeam.DeleteRoute.
+func (c *sunbeamClient) DeleteRoute(ctx context.Context, req *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[emptypb.Empty], error) {
+	return c.deleteRoute.CallUnary(ctx, req)
+}
+
 // SunbeamHandler is an implementation of the sunstone.sunbeam.v1.Sunbeam service.
 type SunbeamHandler interface {
 	// Gets a route.
@@ -113,6 +130,8 @@ type SunbeamHandler interface {
 	ListRoutes(context.Context, *connect.Request[v1.ListRoutesRequest]) (*connect.Response[v1.ListRoutesResponse], error)
 	// Updates a route after its candidate backend becomes ready.
 	UpdateRoute(context.Context, *connect.Request[v1.UpdateRouteRequest]) (*connect.Response[v1.Route], error)
+	// Deletes a route after draining its active requests.
+	DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[emptypb.Empty], error)
 }
 
 // NewSunbeamHandler builds an HTTP handler from the service implementation. It returns the path on
@@ -140,6 +159,12 @@ func NewSunbeamHandler(svc SunbeamHandler, opts ...connect.HandlerOption) (strin
 		connect.WithSchema(sunbeamMethods.ByName("UpdateRoute")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sunbeamDeleteRouteHandler := connect.NewUnaryHandler(
+		SunbeamDeleteRouteProcedure,
+		svc.DeleteRoute,
+		connect.WithSchema(sunbeamMethods.ByName("DeleteRoute")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/sunstone.sunbeam.v1.Sunbeam/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SunbeamGetRouteProcedure:
@@ -148,6 +173,8 @@ func NewSunbeamHandler(svc SunbeamHandler, opts ...connect.HandlerOption) (strin
 			sunbeamListRoutesHandler.ServeHTTP(w, r)
 		case SunbeamUpdateRouteProcedure:
 			sunbeamUpdateRouteHandler.ServeHTTP(w, r)
+		case SunbeamDeleteRouteProcedure:
+			sunbeamDeleteRouteHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -167,4 +194,8 @@ func (UnimplementedSunbeamHandler) ListRoutes(context.Context, *connect.Request[
 
 func (UnimplementedSunbeamHandler) UpdateRoute(context.Context, *connect.Request[v1.UpdateRouteRequest]) (*connect.Response[v1.Route], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("sunstone.sunbeam.v1.Sunbeam.UpdateRoute is not implemented"))
+}
+
+func (UnimplementedSunbeamHandler) DeleteRoute(context.Context, *connect.Request[v1.DeleteRouteRequest]) (*connect.Response[emptypb.Empty], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("sunstone.sunbeam.v1.Sunbeam.DeleteRoute is not implemented"))
 }

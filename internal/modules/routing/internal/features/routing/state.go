@@ -39,6 +39,18 @@ func loadState(path string) (*Route, error) {
 	return &document.Route, nil
 }
 
+func removeState(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	directory, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
+}
+
 func persistState(path string, route Route) error {
 	directory := filepath.Dir(path)
 	temporary, err := os.CreateTemp(directory, ".sunbeam-state-*")

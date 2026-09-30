@@ -6,6 +6,7 @@ import "google/api/annotations.proto";
 import "google/api/client.proto";
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/field_mask.proto";
 
 option go_package = "github.com/goevery/sunstone/internal/gen/sunbeam/v1;sunbeampb";
@@ -34,6 +35,12 @@ service Sunbeam {
       body: "route"
     };
     option (google.api.method_signature) = "route,update_mask";
+  }
+
+  // Deletes a route after draining its active requests.
+  rpc DeleteRoute(DeleteRouteRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {delete: "/v1/{name=routes/*}"};
+    option (google.api.method_signature) = "name";
   }
 }
 
@@ -105,4 +112,17 @@ message UpdateRouteRequest {
 
   // Creates the route when it does not already exist.
   bool allow_missing = 3 [(google.api.field_behavior) = OPTIONAL];
+}
+
+// The request for DeleteRoute.
+message DeleteRouteRequest {
+  // The route to delete.
+  // Format: routes/{route}
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {type: "sunbeam.sunstone.dev/Route"}
+  ];
+
+  // If true, missing routes are ignored.
+  bool allow_missing = 2 [(google.api.field_behavior) = OPTIONAL];
 }

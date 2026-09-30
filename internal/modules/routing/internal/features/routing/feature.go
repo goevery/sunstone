@@ -138,6 +138,34 @@ func (f *Feature) UpdateRoute(ctx context.Context, requested Route, paths []stri
 	return candidate, nil
 }
 
+// DeleteRoute durably removes a route, stops new traffic, and drains admitted requests.
+func (f *Feature) DeleteRoute(name string, allowMissing bool) error {
+	if err := validateRouteName(name); err != nil {
+		return err
+	}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.route == nil || f.route.Name != name {
+		if allowMissing {
+			return nil
+		}
+		return ErrNotFound
+	}
+	if err := removeState(f.config.StatePath); err != nil {
+		return fmt.Errorf("persist route deletion: %w", err)
+	}
+
+	previous := f.active.Load()
+	if previous != nil {
+		previous.drain(f.config.DrainTimeout, func() { f.active.Store(nil) })
+	} else {
+		f.active.Store(nil)
+	}
+	f.route = nil
+	return nil
+}
+
 // Close cancels active backend work and releases idle connections.
 func (f *Feature) Close() {
 	if current := f.active.Load(); current != nil {

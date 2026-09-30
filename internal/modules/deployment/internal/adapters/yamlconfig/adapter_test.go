@@ -9,6 +9,34 @@ import (
 	"github.com/goevery/sunstone/internal/modules/deployment/internal/adapters/yamlconfig"
 )
 
+func TestLoadsFilesAndDirectoriesInDeterministicOrder(t *testing.T) {
+	directory := t.TempDir()
+	workload := func(name string) []byte {
+		return []byte("name: " + name + "\ngcp:\n  project: acme-prod\n  instances: [{zone: us-central1-a, name: vm-1}]\ncontainer:\n  image: example/workload\n")
+	}
+	first := filepath.Join(t.TempDir(), "first.yaml")
+	if err := os.WriteFile(first, workload("first"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "b.yml"), workload("third"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "a.yaml"), workload("second"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "ignored.txt"), workload("ignored"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	workloads, err := yamlconfig.New().LoadAll([]string{first, directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workloads) != 3 || workloads[0].Name != "first" || workloads[1].Name != "second" || workloads[2].Name != "third" {
+		t.Fatalf("workloads = %+v", workloads)
+	}
+}
+
 func TestLoadsMinimalBackgroundWorkload(t *testing.T) {
 	filename := writeConfig(t, `
 name: storefront-jobs

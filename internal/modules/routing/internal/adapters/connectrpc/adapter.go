@@ -8,6 +8,7 @@ import (
 	sunbeampb "github.com/goevery/sunstone/internal/gen/sunbeam/v1"
 	"github.com/goevery/sunstone/internal/gen/sunbeam/v1/sunbeampbconnect"
 	routingfeature "github.com/goevery/sunstone/internal/modules/routing/internal/features/routing"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Adapter exposes route control through ConnectRPC.
@@ -55,6 +56,14 @@ func (a *Adapter) UpdateRoute(ctx context.Context, request *connect.Request[sunb
 		return nil, connectError(err)
 	}
 	return connect.NewResponse(routeToProto(route)), nil
+}
+
+// DeleteRoute deletes the configured route after draining admitted requests.
+func (a *Adapter) DeleteRoute(_ context.Context, request *connect.Request[sunbeampb.DeleteRouteRequest]) (*connect.Response[emptypb.Empty], error) {
+	if err := a.routing.DeleteRoute(request.Msg.GetName(), request.Msg.GetAllowMissing()); err != nil {
+		return nil, connectError(err)
+	}
+	return connect.NewResponse(&emptypb.Empty{}), nil
 }
 
 func routeFromProto(route *sunbeampb.Route) routingfeature.Route {

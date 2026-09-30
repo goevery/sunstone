@@ -10,6 +10,7 @@ import (
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	fieldmaskpb "google.golang.org/protobuf/types/known/fieldmaskpb"
 	reflect "reflect"
 	sync "sync"
@@ -365,11 +366,67 @@ func (x *UpdateRouteRequest) GetAllowMissing() bool {
 	return false
 }
 
+// The request for DeleteRoute.
+type DeleteRouteRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The route to delete.
+	// Format: routes/{route}
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// If true, missing routes are ignored.
+	AllowMissing  bool `protobuf:"varint,2,opt,name=allow_missing,json=allowMissing,proto3" json:"allow_missing,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteRouteRequest) Reset() {
+	*x = DeleteRouteRequest{}
+	mi := &file_sunbeam_v1_sunbeam_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteRouteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteRouteRequest) ProtoMessage() {}
+
+func (x *DeleteRouteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sunbeam_v1_sunbeam_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteRouteRequest.ProtoReflect.Descriptor instead.
+func (*DeleteRouteRequest) Descriptor() ([]byte, []int) {
+	return file_sunbeam_v1_sunbeam_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *DeleteRouteRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *DeleteRouteRequest) GetAllowMissing() bool {
+	if x != nil {
+		return x.AllowMissing
+	}
+	return false
+}
+
 var File_sunbeam_v1_sunbeam_proto protoreflect.FileDescriptor
 
 const file_sunbeam_v1_sunbeam_proto_rawDesc = "" +
 	"\n" +
-	"\x18sunbeam/v1/sunbeam.proto\x12\x13sunstone.sunbeam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a google/protobuf/field_mask.proto\"\x9d\x01\n" +
+	"\x18sunbeam/v1/sunbeam.proto\x12\x13sunstone.sunbeam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a google/protobuf/field_mask.proto\"\x9d\x01\n" +
 	"\x05Route\x12\x17\n" +
 	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12;\n" +
 	"\abackend\x18\x02 \x01(\v2\x1c.sunstone.sunbeam.v1.BackendB\x03\xe0A\x02R\abackend:>\xeaA;\n" +
@@ -392,13 +449,18 @@ const file_sunbeam_v1_sunbeam_proto_rawDesc = "" +
 	"\x05route\x18\x01 \x01(\v2\x1a.sunstone.sunbeam.v1.RouteB\x03\xe0A\x02R\x05route\x12@\n" +
 	"\vupdate_mask\x18\x02 \x01(\v2\x1a.google.protobuf.FieldMaskB\x03\xe0A\x01R\n" +
 	"updateMask\x12(\n" +
-	"\rallow_missing\x18\x03 \x01(\bB\x03\xe0A\x01R\fallowMissing2\x84\x03\n" +
+	"\rallow_missing\x18\x03 \x01(\bB\x03\xe0A\x01R\fallowMissing\"v\n" +
+	"\x12DeleteRouteRequest\x126\n" +
+	"\x04name\x18\x01 \x01(\tB\"\xe0A\x02\xfaA\x1c\n" +
+	"\x1asunbeam.sunstone.dev/RouteR\x04name\x12(\n" +
+	"\rallow_missing\x18\x02 \x01(\bB\x03\xe0A\x01R\fallowMissing2\xf8\x03\n" +
 	"\aSunbeam\x12p\n" +
 	"\bGetRoute\x12$.sunstone.sunbeam.v1.GetRouteRequest\x1a\x1a.sunstone.sunbeam.v1.Route\"\"\xdaA\x04name\x82\xd3\xe4\x93\x02\x15\x12\x13/v1/{name=routes/*}\x12t\n" +
 	"\n" +
 	"ListRoutes\x12&.sunstone.sunbeam.v1.ListRoutesRequest\x1a'.sunstone.sunbeam.v1.ListRoutesResponse\"\x15\xdaA\x00\x82\xd3\xe4\x93\x02\f\x12\n" +
 	"/v1/routes\x12\x90\x01\n" +
-	"\vUpdateRoute\x12'.sunstone.sunbeam.v1.UpdateRouteRequest\x1a\x1a.sunstone.sunbeam.v1.Route\"<\xdaA\x11route,update_mask\x82\xd3\xe4\x93\x02\":\x05route2\x19/v1/{route.name=routes/*}Bh\n" +
+	"\vUpdateRoute\x12'.sunstone.sunbeam.v1.UpdateRouteRequest\x1a\x1a.sunstone.sunbeam.v1.Route\"<\xdaA\x11route,update_mask\x82\xd3\xe4\x93\x02\":\x05route2\x19/v1/{route.name=routes/*}\x12r\n" +
+	"\vDeleteRoute\x12'.sunstone.sunbeam.v1.DeleteRouteRequest\x1a\x16.google.protobuf.Empty\"\"\xdaA\x04name\x82\xd3\xe4\x93\x02\x15*\x13/v1/{name=routes/*}Bh\n" +
 	"\x17dev.sunstone.sunbeam.v1B\fSunbeamProtoP\x01Z=github.com/goevery/sunstone/internal/gen/sunbeam/v1;sunbeampbb\x06proto3"
 
 var (
@@ -413,7 +475,7 @@ func file_sunbeam_v1_sunbeam_proto_rawDescGZIP() []byte {
 	return file_sunbeam_v1_sunbeam_proto_rawDescData
 }
 
-var file_sunbeam_v1_sunbeam_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_sunbeam_v1_sunbeam_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_sunbeam_v1_sunbeam_proto_goTypes = []any{
 	(*Route)(nil),                 // 0: sunstone.sunbeam.v1.Route
 	(*Backend)(nil),               // 1: sunstone.sunbeam.v1.Backend
@@ -421,21 +483,25 @@ var file_sunbeam_v1_sunbeam_proto_goTypes = []any{
 	(*ListRoutesRequest)(nil),     // 3: sunstone.sunbeam.v1.ListRoutesRequest
 	(*ListRoutesResponse)(nil),    // 4: sunstone.sunbeam.v1.ListRoutesResponse
 	(*UpdateRouteRequest)(nil),    // 5: sunstone.sunbeam.v1.UpdateRouteRequest
-	(*fieldmaskpb.FieldMask)(nil), // 6: google.protobuf.FieldMask
+	(*DeleteRouteRequest)(nil),    // 6: sunstone.sunbeam.v1.DeleteRouteRequest
+	(*fieldmaskpb.FieldMask)(nil), // 7: google.protobuf.FieldMask
+	(*emptypb.Empty)(nil),         // 8: google.protobuf.Empty
 }
 var file_sunbeam_v1_sunbeam_proto_depIdxs = []int32{
 	1, // 0: sunstone.sunbeam.v1.Route.backend:type_name -> sunstone.sunbeam.v1.Backend
 	0, // 1: sunstone.sunbeam.v1.ListRoutesResponse.routes:type_name -> sunstone.sunbeam.v1.Route
 	0, // 2: sunstone.sunbeam.v1.UpdateRouteRequest.route:type_name -> sunstone.sunbeam.v1.Route
-	6, // 3: sunstone.sunbeam.v1.UpdateRouteRequest.update_mask:type_name -> google.protobuf.FieldMask
+	7, // 3: sunstone.sunbeam.v1.UpdateRouteRequest.update_mask:type_name -> google.protobuf.FieldMask
 	2, // 4: sunstone.sunbeam.v1.Sunbeam.GetRoute:input_type -> sunstone.sunbeam.v1.GetRouteRequest
 	3, // 5: sunstone.sunbeam.v1.Sunbeam.ListRoutes:input_type -> sunstone.sunbeam.v1.ListRoutesRequest
 	5, // 6: sunstone.sunbeam.v1.Sunbeam.UpdateRoute:input_type -> sunstone.sunbeam.v1.UpdateRouteRequest
-	0, // 7: sunstone.sunbeam.v1.Sunbeam.GetRoute:output_type -> sunstone.sunbeam.v1.Route
-	4, // 8: sunstone.sunbeam.v1.Sunbeam.ListRoutes:output_type -> sunstone.sunbeam.v1.ListRoutesResponse
-	0, // 9: sunstone.sunbeam.v1.Sunbeam.UpdateRoute:output_type -> sunstone.sunbeam.v1.Route
-	7, // [7:10] is the sub-list for method output_type
-	4, // [4:7] is the sub-list for method input_type
+	6, // 7: sunstone.sunbeam.v1.Sunbeam.DeleteRoute:input_type -> sunstone.sunbeam.v1.DeleteRouteRequest
+	0, // 8: sunstone.sunbeam.v1.Sunbeam.GetRoute:output_type -> sunstone.sunbeam.v1.Route
+	4, // 9: sunstone.sunbeam.v1.Sunbeam.ListRoutes:output_type -> sunstone.sunbeam.v1.ListRoutesResponse
+	0, // 10: sunstone.sunbeam.v1.Sunbeam.UpdateRoute:output_type -> sunstone.sunbeam.v1.Route
+	8, // 11: sunstone.sunbeam.v1.Sunbeam.DeleteRoute:output_type -> google.protobuf.Empty
+	8, // [8:12] is the sub-list for method output_type
+	4, // [4:8] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name
 	4, // [4:4] is the sub-list for extension extendee
 	0, // [0:4] is the sub-list for field type_name
@@ -452,7 +518,7 @@ func file_sunbeam_v1_sunbeam_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sunbeam_v1_sunbeam_proto_rawDesc), len(file_sunbeam_v1_sunbeam_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

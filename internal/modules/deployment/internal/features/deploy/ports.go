@@ -5,6 +5,7 @@ import "context"
 // Loader obtains one validated workload definition.
 type Loader interface {
 	Load(string) (Workload, error)
+	LoadAll([]string) ([]Workload, error)
 }
 
 // Connector establishes access to a target VM's container runtime.
@@ -23,6 +24,7 @@ type Host interface {
 	BackendAddress(context.Context, Container, uint16) (string, error)
 	Route(context.Context, string) (Route, bool, error)
 	UpdateRoute(context.Context, Route) error
+	DeleteRoute(context.Context, string, bool) error
 	Stop(context.Context, Container) error
 	Verify(context.Context, Container) error
 	Logs(context.Context, Container) (string, error)
@@ -80,6 +82,7 @@ type Image struct {
 type Container struct {
 	ID      string
 	Name    string
+	Image   string
 	Running bool
 	Healthy bool
 }

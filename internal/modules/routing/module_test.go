@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,6 +45,113 @@ func TestAcceptsContainerInterfaceControlListener(t *testing.T) {
 	}
 	if module == nil {
 		t.Fatal("routing module is nil")
+	}
+}
+
+func TestDeleteRouteStopsNewTrafficDrainsAndPersistsRemoval(t *testing.T) {
+	admitted := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	backend := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/readyz":
+			writer.WriteHeader(http.StatusNoContent)
+		case "/hold":
+			close(admitted)
+			<-release
+			_, _ = io.WriteString(writer, "complete")
+		default:
+			_, _ = io.WriteString(writer, "active")
+		}
+	}))
+	defer backend.Close()
+
+	traffic := listen(t)
+	control := listen(t)
+	statePath := filepath.Join(t.TempDir(), "routes.json")
+	module, err := routing.New(routing.Config{
+		TrafficListener: traffic,
+		ControlListener: control,
+		StatePath:       statePath,
+		ProbeTimeout:    100 * time.Millisecond,
+		ProbeInterval:   10 * time.Millisecond,
+		StartupDeadline: time.Second,
+		DrainTimeout:    time.Second,
+		ShutdownTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- module.Serve(ctx) }()
+	waitForHTTP(t, "http://"+control.Addr().String()+"/sunstone.sunbeam.v1.Sunbeam/GetRoute")
+
+	client := sunbeampbconnect.NewSunbeamClient(http.DefaultClient, "http://"+control.Addr().String())
+	if _, err := client.UpdateRoute(context.Background(), connect.NewRequest(routeRequest("container-1", backend.Listener.Addr().String()))); err != nil {
+		t.Fatal(err)
+	}
+	requestDone := make(chan error, 1)
+	go func() {
+		response, err := http.Get("http://" + traffic.Addr().String() + "/hold")
+		if err == nil {
+			_, err = io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+		}
+		requestDone <- err
+	}()
+	<-admitted
+
+	deleteDone := make(chan error, 1)
+	go func() {
+		_, err := client.DeleteRoute(context.Background(), connect.NewRequest(&sunbeampb.DeleteRouteRequest{Name: "routes/storefront"}))
+		deleteDone <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		response, err := http.Get("http://" + traffic.Addr().String())
+		if err == nil && response.StatusCode == http.StatusServiceUnavailable {
+			response.Body.Close()
+			break
+		}
+		if err == nil {
+			response.Body.Close()
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("new traffic was not rejected during route deletion")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	select {
+	case err := <-deleteDone:
+		t.Fatalf("delete returned before admitted request drained: %v", err)
+	default:
+	}
+
+	releaseOnce.Do(func() { close(release) })
+	if err := <-requestDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-deleteDone; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatalf("persisted state still exists: %v", err)
+	}
+	if _, err := client.GetRoute(context.Background(), connect.NewRequest(&sunbeampb.GetRouteRequest{Name: "routes/storefront"})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("deleted route error = %v", err)
+	}
+	if _, err := client.DeleteRoute(context.Background(), connect.NewRequest(&sunbeampb.DeleteRouteRequest{Name: "routes/storefront"})); connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("missing route error = %v", err)
+	}
+	if _, err := client.DeleteRoute(context.Background(), connect.NewRequest(&sunbeampb.DeleteRouteRequest{Name: "routes/storefront", AllowMissing: true})); err != nil {
+		t.Fatalf("allow missing delete: %v", err)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
