@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -44,11 +45,20 @@ type host struct {
 	docker           *client.Client
 	ssh              *ssh.Client
 	controlTransport *http.Transport
+	secretTransport  *http.Transport
+	secretClient     *http.Client
+	secretsMu        sync.Mutex
+	secretValues     map[string]string
 	routes           sunbeampbconnect.SunbeamClient
 }
 
 func (h *host) Close() error {
 	h.controlTransport.CloseIdleConnections()
+	h.secretTransport.CloseIdleConnections()
+	h.secretsMu.Lock()
+	clear(h.secretValues)
+	h.secretsMu.Unlock()
+
 	return errors.Join(h.docker.Close(), h.ssh.Close())
 }
 
@@ -105,9 +115,13 @@ func (h *host) WorkloadContainers(ctx context.Context, workload string) ([]deplo
 }
 
 func (h *host) Matches(ctx context.Context, current deploy.Container, desired deploy.ContainerSpec) (bool, error) {
-	inspected, err := h.docker.ContainerInspect(ctx, current.ID, client.ContainerInspectOptions{})
+	resolved, err := h.environment(ctx, desired)
 	if err != nil {
 		return false, err
+	}
+	inspected, err := h.docker.ContainerInspect(ctx, current.ID, client.ContainerInspectOptions{})
+	if err != nil {
+		return false, h.safeError(err)
 	}
 	if inspected.Container.Config == nil || inspected.Container.HostConfig == nil {
 		return false, errors.New("container has incomplete configuration")
@@ -117,7 +131,7 @@ func (h *host) Matches(ctx context.Context, current deploy.Container, desired de
 		expectedCommand = desired.Image.DefaultCommand
 	}
 	expectedEnvironment := environmentMap(desired.Image.DefaultEnvironment)
-	maps.Copy(expectedEnvironment, desired.Environment)
+	maps.Copy(expectedEnvironment, resolved)
 	actualEnvironment := environmentMap(inspected.Container.Config.Env)
 
 	fingerprint, err := configurationFingerprint(desired)
@@ -128,18 +142,7 @@ func (h *host) Matches(ctx context.Context, current deploy.Container, desired de
 		return false, nil
 	}
 
-	expectedRuntime := ""
-	if len(desired.SecretEnvironment) != 0 {
-		expectedRuntime = "sunray"
-		var actualReferences map[string]string
-		if err := json.Unmarshal([]byte(inspected.Container.HostConfig.Annotations["dev.sunstone.secret-env"]), &actualReferences); err != nil || !maps.Equal(actualReferences, desired.SecretEnvironment) {
-			return false, nil
-		}
-	}
-	actualRuntime := inspected.Container.HostConfig.Runtime
-	runtimeMatches := actualRuntime == expectedRuntime || (expectedRuntime == "" && actualRuntime != "sunray")
-
-	return runtimeMatches && inspected.Container.Image == desired.Image.ID &&
+	return inspected.Container.Image == desired.Image.ID &&
 		slices.Equal(inspected.Container.Config.Cmd, expectedCommand) &&
 		maps.Equal(actualEnvironment, expectedEnvironment) &&
 		string(inspected.Container.HostConfig.RestartPolicy.Name) == desired.RestartPolicy &&
@@ -156,9 +159,14 @@ func (h *host) Create(ctx context.Context, spec deploy.ContainerSpec) (deploy.Co
 		return deploy.Container{}, fmt.Errorf("generate container name: %w", err)
 	}
 	name := managedContainerName(spec.Name, fingerprint, hex.EncodeToString(suffix))
-	created, err := h.docker.ContainerCreate(ctx, containerCreateOptions(spec, name, fingerprint))
+	// Fingerprint references and literal configuration, never resolved payloads.
+	spec.Environment, err = h.environment(ctx, spec)
 	if err != nil {
 		return deploy.Container{}, err
+	}
+	created, err := h.docker.ContainerCreate(ctx, containerCreateOptions(spec, name, fingerprint))
+	if err != nil {
+		return deploy.Container{}, h.safeError(err)
 	}
 
 	return deploy.Container{ID: created.ID, Name: name}, nil
@@ -166,7 +174,7 @@ func (h *host) Create(ctx context.Context, spec deploy.ContainerSpec) (deploy.Co
 
 func (h *host) Start(ctx context.Context, target deploy.Container) error {
 	_, err := h.docker.ContainerStart(ctx, target.ID, client.ContainerStartOptions{})
-	return err
+	return h.safeError(err)
 }
 
 func (h *host) BackendAddress(_ context.Context, target deploy.Container, containerPort uint16) (string, error) {
@@ -221,7 +229,7 @@ func routeFromProto(route *sunbeampb.Route) deploy.Route {
 
 func (h *host) Stop(ctx context.Context, target deploy.Container) error {
 	_, err := h.docker.ContainerStop(ctx, target.ID, client.ContainerStopOptions{})
-	return err
+	return h.safeError(err)
 }
 
 func (h *host) Verify(ctx context.Context, target deploy.Container) error {
@@ -231,7 +239,7 @@ func (h *host) Verify(ctx context.Context, target deploy.Container) error {
 	for {
 		inspected, err := h.docker.ContainerInspect(ctx, target.ID, client.ContainerInspectOptions{})
 		if err != nil {
-			return err
+			return h.safeError(err)
 		}
 		state := inspected.Container.State
 		if state == nil || !state.Running {
@@ -239,7 +247,7 @@ func (h *host) Verify(ctx context.Context, target deploy.Container) error {
 				return errors.New("container has no reported state")
 			}
 
-			return fmt.Errorf("container is %s with exit code %d", state.Status, state.ExitCode)
+			return h.safeError(fmt.Errorf("container is %s with exit code %d", state.Status, state.ExitCode))
 		}
 		if state.Health == nil || string(state.Health.Status) == "healthy" {
 			return nil
@@ -265,14 +273,14 @@ func (h *host) Logs(ctx context.Context, target deploy.Container) (string, error
 		Tail:       "100",
 	})
 	if err != nil {
-		return "", err
+		return "", h.safeError(err)
 	}
 	defer logs.Close()
 
 	var output bytes.Buffer
 	limited := io.LimitReader(logs, maximumLogBytes)
 	if _, err := stdcopy.StdCopy(&output, &output, limited); err != nil {
-		return "", err
+		return "", h.safeError(err)
 	}
 
 	return output.String(), nil
@@ -280,7 +288,7 @@ func (h *host) Logs(ctx context.Context, target deploy.Container) (string, error
 
 func (h *host) Remove(ctx context.Context, target deploy.Container) error {
 	_, err := h.docker.ContainerRemove(ctx, target.ID, client.ContainerRemoveOptions{Force: true})
-	return err
+	return h.safeError(err)
 }
 
 func containerCreateOptions(spec deploy.ContainerSpec, name, fingerprint string) client.ContainerCreateOptions {
@@ -303,9 +311,8 @@ func containerCreateOptions(spec deploy.ContainerSpec, name, fingerprint string)
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(spec.RestartPolicy)},
 	}
 	if len(spec.SecretEnvironment) != 0 {
-		references, _ := json.Marshal(spec.SecretEnvironment) // A string map is always JSON-encodable.
-		hostConfig.Runtime = "sunray"
-		hostConfig.Annotations = map[string]string{"dev.sunstone.secret-env": string(references)}
+		references, _ := json.Marshal(spec.SecretEnvironment) // String maps are always JSON-encodable.
+		config.Labels[secretEnvironmentLabel] = string(references)
 	}
 	var networkingConfig *network.NetworkingConfig
 	if spec.HTTP != nil {
@@ -344,20 +351,12 @@ func configurationFingerprint(spec deploy.ContainerSpec) (string, error) {
 		HTTP              *deploy.HTTPConfig `json:",omitempty"`
 		Network           string             `json:",omitempty"`
 		SecretEnvironment map[string]string  `json:",omitempty"`
-		Runtime           string             `json:",omitempty"`
-	}{spec.Image.ID, spec.Command, spec.Environment, spec.RestartPolicy, spec.HTTP, networkName, spec.SecretEnvironment, secretRuntime(spec)})
+	}{spec.Image.ID, spec.Command, spec.Environment, spec.RestartPolicy, spec.HTTP, networkName, spec.SecretEnvironment})
 	if err != nil {
 		return "", fmt.Errorf("encode container configuration: %w", err)
 	}
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:]), nil
-}
-
-func secretRuntime(spec deploy.ContainerSpec) string {
-	if len(spec.SecretEnvironment) != 0 {
-		return "sunray"
-	}
-	return ""
 }
 
 func environmentMap(environment []string) map[string]string {

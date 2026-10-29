@@ -267,11 +267,19 @@ func openHost(tunnel net.Conn, signer ssh.Signer, username, hostAlias string, ho
 		},
 	}
 	controlClient := &http.Client{Transport: controlTransport}
+	secretTransport := &http.Transport{DialContext: sshClient.DialContext}
+	secretClient := &http.Client{
+		Transport:     secretTransport,
+		Timeout:       secretPreparationLimit,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 
 	return &host{
 		docker:           dockerClient,
 		ssh:              sshClient,
 		controlTransport: controlTransport,
+		secretTransport:  secretTransport,
+		secretClient:     secretClient,
 		routes:           sunbeampbconnect.NewSunbeamClient(controlClient, "http://sunbeam"),
 	}, nil
 }

@@ -1,22 +1,25 @@
 package yamlconfig_test
 
 import (
-	"github.com/goevery/sunstone/internal/modules/deployment/internal/adapters/yamlconfig"
 	"testing"
+
+	"github.com/goevery/sunstone/internal/modules/deployment/internal/adapters/yamlconfig"
 )
 
 func TestRejectsAmbiguousAndMalformedEnvironment(t *testing.T) {
 	cases := []string{
-		`[{name: API_KEY, value: "x", valueFrom: {secretKeyRef: {name: key, key: latest}}}]`,
+		`[{name: API_KEY, value: "x", valueFrom: {secretKeyRef: {name: key, version: latest}}}]`,
 		`[{name: API_KEY}]`,
 		`[{name: API_KEY, value: 1}]`,
 		`[{name: API_KEY, value: "", extra: "x"}]`,
-		`[{name: API_KEY, valueFrom: {extra: "x", secretKeyRef: {name: key, key: latest}}}]`,
-		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: key, key: latest, extra: x}}}]`,
-		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: "", key: ""}}}]`,
-		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: key, key: ""}}}]`,
-		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: projects/p/secrets/s/versions/1, key: latest}}}]`,
-		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: key, key: 1}}}]`,
+		`[{name: API_KEY, valueFrom: {extra: "x", secretKeyRef: {name: key, version: latest}}}]`,
+		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: key, version: latest, extra: x}}}]`,
+		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: "", version: ""}}}]`,
+		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: key, version: ""}}}]`,
+		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: projects/p/secrets/s/versions/1, version: latest}}}]`,
+		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: key, version: 1}}}]`,
+		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: key, key: latest}}}]`,
+		`[{name: API_KEY, valueFrom: {secretKeyRef: {name: key, version: latest, key: latest}}}]`,
 		`[{name: API_KEY, value: x}, {name: API_KEY, value: y}]`,
 		`{API_KEY: x, API_KEY: y}`,
 		`{BAD-NAME: x}`,
@@ -43,10 +46,10 @@ container:
       value: ""
     - name: API_KEY
       valueFrom:
-        secretKeyRef: {name: api-key, key: latest}
+        secretKeyRef: {name: api-key, version: latest}
     - name: DATABASE
       valueFrom:
-        secretKeyRef: {name: projects/other-project/secrets/database, key: "3"}
+        secretKeyRef: {name: projects/other-project/secrets/database, version: "3"}
 `)
 	workload, err := yamlconfig.New().Load(filename)
 	if err != nil {

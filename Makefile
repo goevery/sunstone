@@ -4,25 +4,17 @@ IMAGE ?= localhost/sunbeam:dev
 SUNBEAM_BINARY := $(BUILD_DIR)/sunbeam
 SUNBEAM_STATE_DIR := $(BUILD_DIR)/sunbeam-state
 SUNBEAM_SOURCES := $(shell find cmd/sunbeam internal/gen/sunbeam internal/modules/routing -name '*.go') go.mod go.sum Makefile
-SUNRAY_BINARY := $(BUILD_DIR)/sunray
-SUNRAY_SOURCES := $(shell find cmd/sunray internal/modules/sunray -name '*.go') go.mod go.sum Makefile
 
 D2_SOURCES := docs/diagrams/architecture.d2 $(wildcard docs/diagrams/icons/*.svg)
 PROTOC_GEN_GO := $(shell $(GO) tool -n protoc-gen-go)
 PROTOC_GEN_CONNECT_GO := $(shell $(GO) tool -n protoc-gen-connect-go)
 PROTO_SOURCES := $(wildcard api/sunbeam/v1/*.proto)
 
-.PHONY: all clean generate image sunbeam sunray
+.PHONY: all clean generate image sunbeam
 
 all: docs/diagrams/architecture.png
 
 sunbeam: $(SUNBEAM_BINARY)
-
-sunray: $(SUNRAY_BINARY)
-
-$(SUNRAY_BINARY): $(SUNRAY_SOURCES)
-	mkdir -p "$(@D)"
-	CGO_ENABLED=0 GOOS=linux $(GO) build -trimpath -ldflags='-s -w' -o "$@" ./cmd/sunray
 
 $(SUNBEAM_BINARY): $(SUNBEAM_SOURCES)
 	mkdir -p "$(@D)"

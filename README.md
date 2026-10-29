@@ -78,9 +78,13 @@ container:
   command: ["bin/web"]
 
   env:
-    APP_ENV: production
-    DATABASE_URL:
-      secret: projects/acme-prod/secrets/database-url/versions/latest
+    - name: APP_ENV
+      value: production
+    - name: DATABASE_URL
+      valueFrom:
+        secretKeyRef:
+          name: projects/acme-prod/secrets/database-url
+          version: latest
 
   resources:
     cpu:
@@ -118,6 +122,16 @@ container:
   image: us-central1-docker.pkg.dev/acme-prod/apps/storefront
   command: ["bin/jobs"]
 ```
+
+### Secrets
+
+Sunstone can fill environment variables from Google Secret Manager. During deployment, it reads each VM’s secrets over SSH using that VM’s service account. The account must have access to the secrets before Sunstone can change the workload’s containers.
+
+In the workload file, `valueFrom.secretKeyRef` identifies the secret by `name` and `version`. For example, if `gcp.project` is `acme-prod`, the name `database-url` means `projects/acme-prod/secrets/database-url`. To read a secret from another project, use its full name, such as `projects/other-project/secrets/database-url`. The version can be `latest` or a quoted number like `"3"`. Secrets can sit alongside plain `value` entries, and plain environment maps still work.
+
+Docker stores the values it receives, so container restarts and VM reboots reuse them. Deploy again to pick up changed secrets. HTTP `sunstone restart` also reads secrets again because it creates a replacement container.
+
+These values pass through Sunstone’s memory and remain visible through `docker inspect`.
 
 ## Inspiration
 

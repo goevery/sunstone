@@ -235,16 +235,16 @@ func (environment *strictEnvironment) UnmarshalYAML(node *yaml.Node) error {
 				var source, reference map[string]*yaml.Node
 				source, err = environmentFields(from, "secretKeyRef")
 				if err == nil {
-					reference, err = environmentFields(source["secretKeyRef"], "name", "key")
+					reference, err = environmentFields(source["secretKeyRef"], "name", "version")
 				}
 				if err == nil {
 					entry.secretName, err = environmentString(reference["name"])
 				}
 				if err == nil {
-					entry.version, err = environmentString(reference["key"])
+					entry.version, err = environmentString(reference["version"])
 				}
 				if err == nil && (entry.secretName == "" || entry.version == "") {
-					err = errors.New("container.env secretKeyRef name and key are required")
+					err = errors.New("container.env secretKeyRef name and version are required")
 				}
 			}
 			if err != nil {
@@ -281,7 +281,7 @@ func (environment strictEnvironment) resolve(project string) (map[string]string,
 			name = "projects/" + project + "/secrets/" + name
 		}
 		if !secretNamePattern.MatchString(name) || !versionPattern.MatchString(entry.version) {
-			return nil, nil, errors.New("container.env secretKeyRef requires a valid secret name and explicit version key")
+			return nil, nil, errors.New("container.env secretKeyRef requires a valid secret name and explicit version")
 		}
 		if references == nil {
 			references = make(map[string]string)

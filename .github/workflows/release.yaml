@@ -32,44 +32,6 @@ jobs:
           release-type: go
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  package-sunray:
-    name: Package Sunray runtime
-    needs: release
-    if: ${{ needs.release.outputs.created == 'true' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout release
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.release.outputs.sha }}
-
-      - name: Set up Go
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Test
-        run: go test ./...
-
-      - name: Build static Linux runtimes
-        shell: bash
-        run: |
-          set -euo pipefail
-          for arch in amd64 arm64; do
-            GOARCH="$arch" make sunray BUILD_DIR="build/$arch"
-            cp "build/$arch/sunray" "build/sunray-linux-$arch"
-          done
-          (cd build && sha256sum sunray-linux-* > sunray-checksums.txt)
-
-      - name: Attach runtime artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.release.outputs.tag }}
-        run: gh release upload "$RELEASE_TAG" build/sunray-linux-* build/sunray-checksums.txt
-
   publish-sunbeam:
     name: Publish Sunbeam image
     needs: release
