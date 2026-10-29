@@ -3,7 +3,7 @@ BUILD_DIR ?= build
 IMAGE ?= localhost/sunbeam:dev
 SUNBEAM_BINARY := $(BUILD_DIR)/sunbeam
 SUNBEAM_STATE_DIR := $(BUILD_DIR)/sunbeam-state
-SUNBEAM_SOURCES := $(shell find cmd/sunbeam internal/gen/sunbeam internal/modules/routing -name '*.go') go.mod go.sum Makefile
+SUNBEAM_SOURCES := $(shell find cmd/sunbeam internal/gen/sunbeam internal/routing -name '*.go') go.mod go.sum Makefile
 
 D2_SOURCES := docs/diagrams/architecture.d2 $(wildcard docs/diagrams/icons/*.svg)
 PROTOC_GEN_GO := $(shell $(GO) tool -n protoc-gen-go)
@@ -43,7 +43,6 @@ generate:
 		--go_out=. --go_opt=module=github.com/goevery/sunstone \
 		--connect-go_out=. --connect-go_opt=module=github.com/goevery/sunstone \
 		$(PROTO_SOURCES)
-	$(GO) tool mockery
 
 docs/diagrams/architecture.png: $(D2_SOURCES)
 	$(GO) tool d2 docs/diagrams/architecture.d2 $@

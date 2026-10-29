@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/goevery/sunstone/internal/modules/routing"
+	"github.com/goevery/sunstone/internal/routing"
 )
 
 const (
@@ -30,6 +30,8 @@ func main() {
 	}
 }
 
+// run owns both listeners: a constructor failure at any later step closes
+// them, and the server borrows them for the life of the command.
 func run() error {
 	traffic, err := net.Listen("tcp", trafficAddress)
 	if err != nil {
@@ -38,23 +40,34 @@ func run() error {
 	control, err := net.Listen("tcp", controlAddress)
 	if err != nil {
 		traffic.Close()
+
 		return fmt.Errorf("listen for control requests: %w", err)
 	}
-	module, err := routing.New(routing.Config{
-		TrafficListener: traffic,
-		ControlListener: control,
+
+	router, err := routing.NewRouter(routing.RouterConfig{
 		StatePath:       routing.DefaultStatePath,
 		ProbeTimeout:    probeTimeout,
 		ProbeInterval:   probeInterval,
 		StartupDeadline: startupDeadline,
 		DrainTimeout:    drainTimeout,
+	})
+	if err != nil {
+		return errors.Join(err, traffic.Close(), control.Close())
+	}
+	server, err := routing.NewServer(routing.ServerConfig{
+		TrafficListener: traffic,
+		ControlListener: control,
+		Router:          router,
 		ShutdownTimeout: shutdownTimeout,
 	})
 	if err != nil {
+		router.Close()
+
 		return errors.Join(err, traffic.Close(), control.Close())
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	return module.Serve(ctx)
+
+	return server.Serve(ctx)
 }
