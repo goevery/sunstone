@@ -42,19 +42,19 @@ You provision projects, networks, IAM, VMs, and load balancers separately.
 
 ## Commands
 
-Use `-f` to pass a workload file or directory.
+`deploy` loads one workload from a file; the other commands accept files or directories with `-f`.
 
 ```text
-sunstone deploy  -f FILE_OR_DIRECTORY
+sunstone deploy  -f FILE
 sunstone status  -f FILE_OR_DIRECTORY
 sunstone restart -f FILE_OR_DIRECTORY
 sunstone remove  -f FILE_OR_DIRECTORY
 ```
 
-- `deploy` validates and deploys the workload.
-- `status` reports its state on each VM.
-- `restart` restarts it one VM at a time.
-- `remove` drains traffic and removes it while leaving the VMs and Sunbeam running.
+- `deploy` applies the workload definition, including image and secret updates.
+- `status` shows the workload's state on each VM.
+- `restart` restarts the deployed workload with its existing image and environment.
+- `remove` removes the workload while leaving the VMs and Sunbeam running.
 
 Run `sunstone COMMAND --help` for complete usage and options.
 
@@ -86,26 +86,12 @@ container:
           name: projects/acme-prod/secrets/database-url
           version: latest
 
-  resources:
-    cpu:
-      shares: 1024
-    memory:
-      limit: 512MiB
-
-  readinessProbe:
+http:
+  containerPort: 3000
+  startupProbe:
     httpGet:
       path: /up
-      port: 3000
-
-http:
-  port: 3000
-  routes:
-    - host: shop.example.com
 ```
-
-Sunstone configures CPU and memory differently because they behave differently when containers share a VM. CPU is compressible. A container can receive less CPU and keep running, only more slowly. CPU shares only matter when the VM is busy. Containers with more shares get more CPU. When the VM has spare CPU, any container can use it.
-
-Memory is incompressible. A container cannot adapt to memory pressure merely by running more slowly. A hard memory limit protects other workloads on the host, and exceeding it can cause an out-of-memory kill.
 
 HTTP workloads and background workloads use the same configuration format. Here is a background workload using that format.
 
@@ -129,7 +115,7 @@ Sunstone can fill environment variables from Google Secret Manager. During deplo
 
 In the workload file, `valueFrom.secretKeyRef` identifies the secret by `name` and `version`. For example, if `gcp.project` is `acme-prod`, the name `database-url` means `projects/acme-prod/secrets/database-url`. To read a secret from another project, use its full name, such as `projects/other-project/secrets/database-url`. The version can be `latest` or a quoted number like `"3"`. Secrets can sit alongside plain `value` entries, and plain environment maps still work.
 
-Docker stores the values it receives, so container restarts and VM reboots reuse them. Deploy again to pick up changed secrets. HTTP `sunstone restart` also reads secrets again because it creates a replacement container.
+Restarts and VM reboots reuse deployed secret values. Run `sunstone deploy` to pick up changed secrets.
 
 These values pass through Sunstone’s memory and remain visible through `docker inspect`.
 
