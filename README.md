@@ -26,7 +26,7 @@ Orchestrators like Kubernetes solve important problems. For applications that fi
 
 **Private Compute Engine VMs** run without external IP addresses. Application traffic reaches HTTP workloads through Cloud Load Balancing, while deployment traffic reaches the VMs through IAP. This keeps the machines off the public internet and avoids exposing SSH directly. The VPC must provide the required access to Google APIs and outbound services.
 
-**IAP, OS Login, and SSH** each serve a different purpose. [IAP](https://cloud.google.com/iap/docs/using-tcp-forwarding) creates an IAM-controlled tunnel to a VM’s internal address. [OS Login](https://cloud.google.com/compute/docs/oslogin) controls who may log in using Google identities and IAM roles. SSH carries Sunstone’s commands through that tunnel. Together, they avoid public SSH endpoints, bastion hosts, and manually managed SSH keys.
+**IAP, OS Login, and SSH** each serve a different purpose. [IAP](https://cloud.google.com/iap/docs/using-tcp-forwarding) creates an IAM-controlled tunnel to a VM’s internal address. [OS Login](https://cloud.google.com/compute/docs/oslogin) controls who may log in using Google identities and IAM roles. SSH carries Sunstone’s commands through that tunnel. Together, they avoid public SSH endpoints and bastion hosts. Sunstone manages a local SSH key per service account, with short-lived OS Login authorization.
 
 **Sunbeam** runs once on each VM. It routes requests to HTTP workloads, waits for replacements to become ready, switches traffic, and drains old containers. Background workloads run without the proxy.
 

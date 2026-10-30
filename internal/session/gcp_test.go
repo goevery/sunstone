@@ -62,31 +62,31 @@ func TestReusesOneLoginIdentityAcrossTargetConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	imports := 0
-	importKey := func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error) {
-		imports++
+	authorizations := 0
+	authorize := func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error) {
+		authorizations++
 
 		return "operator", nil
 	}
-	if err := first.login(t.Context(), signer, "acme-prod", "operator@example.com", importKey); err != nil {
+	if err := first.login(t.Context(), signer, "acme-prod", "operator@example.com", authorize); err != nil {
 		t.Fatal(err)
 	}
-	if err := second.login(t.Context(), signer, "acme-prod", "operator@example.com", importKey); err != nil {
+	if err := second.login(t.Context(), signer, "acme-prod", "operator@example.com", authorize); err != nil {
 		t.Fatal(err)
 	}
-	if prepared != 1 || imports != 1 || first != second || first.username != "operator" {
-		t.Fatalf("prepared = %d, imports = %d, identities = %p, %p", prepared, imports, first, second)
+	if prepared != 1 || authorizations != 1 || first != second || first.username != "operator" {
+		t.Fatalf("prepared = %d, authorizations = %d, identities = %p, %p", prepared, authorizations, first, second)
 	}
 }
 
-func TestComputeLookupRunsWhileOSLoginKeyImports(t *testing.T) {
-	importStarted := make(chan struct{})
-	releaseImport := make(chan struct{})
+func TestComputeLookupRunsWhileOSLoginKeyAuthorizes(t *testing.T) {
+	authorizeStarted := make(chan struct{})
+	releaseAuthorize := make(chan struct{})
 	lookupStarted := make(chan struct{})
 	identity := &loginIdentity{}
-	importKey := func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error) {
-		close(importStarted)
-		<-releaseImport
+	authorize := func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error) {
+		close(authorizeStarted)
+		<-releaseAuthorize
 
 		return "operator", nil
 	}
@@ -99,19 +99,19 @@ func TestComputeLookupRunsWhileOSLoginKeyImports(t *testing.T) {
 
 				return &compute.Instance{Id: 1}, nil
 			},
-			importKey,
+			authorize,
 		)
 		result <- err
 	}()
 
-	for name, started := range map[string]<-chan struct{}{"OS Login import": importStarted, "Compute lookup": lookupStarted} {
+	for name, started := range map[string]<-chan struct{}{"OS Login authorization": authorizeStarted, "Compute lookup": lookupStarted} {
 		select {
 		case <-started:
 		case <-time.After(time.Second):
 			t.Fatalf("%s did not start concurrently", name)
 		}
 	}
-	close(releaseImport)
+	close(releaseAuthorize)
 	if err := <-result; err != nil {
 		t.Fatal(err)
 	}

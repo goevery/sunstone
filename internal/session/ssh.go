@@ -109,9 +109,7 @@ func (handshake Handshake) validate() error {
 	return nil
 }
 
-// GenerateSigner creates the ephemeral ED25519 key used to authenticate
-// sessions. The composition root invokes it and passes the signer to the
-// connector constructor.
+// GenerateSigner creates an in-memory ED25519 signer without persisting it.
 func GenerateSigner() (ssh.Signer, error) {
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

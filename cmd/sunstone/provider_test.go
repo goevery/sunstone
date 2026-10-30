@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -217,6 +220,139 @@ func TestOpenReportsSessionFailures(t *testing.T) {
 	if opens != 1 || closes != 0 {
 		t.Fatalf("opens = %d, closes = %d", opens, closes)
 	}
+}
+
+// TestProductionProviderLoadsSameKeyAcrossCalls verifies that repeated
+// provider construction reuses the persisted key instead of generating a
+// new one. Construction alone performs no network access.
+func TestProductionProviderLoadsSameKeyAcrossCalls(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	account := "deployer@sunstone-test.iam.gserviceaccount.com"
+
+	if _, err := productionProvider(account); err != nil {
+		t.Fatalf("first productionProvider: %v", err)
+	}
+	first, err := os.ReadFile(productionKeyPath(dataHome, account))
+	if err != nil {
+		t.Fatalf("read key after first construction: %v", err)
+	}
+
+	if _, err := productionProvider(account); err != nil {
+		t.Fatalf("second productionProvider: %v", err)
+	}
+	second, err := os.ReadFile(productionKeyPath(dataHome, account))
+	if err != nil {
+		t.Fatalf("read key after second construction: %v", err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Error("second construction replaced the persisted key")
+	}
+}
+
+func TestProductionProviderSeparatesIdentities(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	accounts := []string{
+		"deployer@sunstone-test.iam.gserviceaccount.com",
+		"status-bot@sunstone-test.iam.gserviceaccount.com",
+	}
+
+	for _, account := range accounts {
+		if _, err := productionProvider(account); err != nil {
+			t.Fatalf("productionProvider(%s): %v", account, err)
+		}
+	}
+
+	keys := make([][]byte, len(accounts))
+	for i, account := range accounts {
+		key, err := os.ReadFile(productionKeyPath(dataHome, account))
+		if err != nil {
+			t.Fatalf("read key for %s: %v", account, err)
+		}
+		keys[i] = key
+	}
+	if bytes.Equal(keys[0], keys[1]) {
+		t.Error("identities shared one key file")
+	}
+}
+
+func TestProductionProviderHonorsXDGDataHome(t *testing.T) {
+	dataHome := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	account := "deployer@sunstone-test.iam.gserviceaccount.com"
+
+	if _, err := productionProvider(account); err != nil {
+		t.Fatalf("productionProvider: %v", err)
+	}
+	if _, err := os.Stat(productionKeyPath(dataHome, account)); err != nil {
+		t.Fatalf("key was not created under XDG_DATA_HOME: %v", err)
+	}
+}
+
+func TestProductionProviderDefaultsToHomeLocalShare(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", "")
+	account := "deployer@sunstone-test.iam.gserviceaccount.com"
+
+	if _, err := productionProvider(account); err != nil {
+		t.Fatalf("productionProvider: %v", err)
+	}
+	if _, err := os.Stat(productionKeyPath(filepath.Join(home, ".local", "share"), account)); err != nil {
+		t.Fatalf("key was not created under ~/.local/share: %v", err)
+	}
+}
+
+// TestProductionProviderCreatesMissingDataHome verifies the XDG root is
+// created on first use when it does not exist yet.
+func TestProductionProviderCreatesMissingDataHome(t *testing.T) {
+	dataHome := filepath.Join(t.TempDir(), "xdg", "data")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	account := "deployer@sunstone-test.iam.gserviceaccount.com"
+
+	if _, err := productionProvider(account); err != nil {
+		t.Fatalf("productionProvider: %v", err)
+	}
+	if _, err := os.Stat(productionKeyPath(dataHome, account)); err != nil {
+		t.Fatalf("key was not created under the missing XDG data home: %v", err)
+	}
+}
+
+func TestProductionProviderRejectsRelativeXDGDataHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", "relative/data")
+	t.Chdir(t.TempDir())
+
+	if _, err := productionProvider("deployer@sunstone-test.iam.gserviceaccount.com"); err == nil {
+		t.Fatal("relative XDG_DATA_HOME was accepted")
+	}
+	if _, err := os.Stat("relative"); err == nil {
+		t.Fatal("relative XDG_DATA_HOME created directories in the working directory")
+	}
+}
+
+func TestProductionProviderRejectsInvalidIdentity(t *testing.T) {
+	dataHome := filepath.Join(t.TempDir(), "xdg", "data")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_DATA_HOME", dataHome)
+
+	if _, err := productionProvider("not-an-email"); err == nil {
+		t.Fatal("invalid service account was accepted")
+	}
+	if _, err := os.Stat(dataHome); err == nil {
+		t.Fatal("invalid service account created the data home")
+	}
+}
+
+// productionKeyPath returns the persisted key location for one service
+// account under dataHome.
+func productionKeyPath(dataHome, serviceAccount string) string {
+	return filepath.Join(dataHome, "sunstone", "ssh", serviceAccount, "id_ed25519")
 }
 
 // recordingSession is a targetSession test double counting Close calls.
