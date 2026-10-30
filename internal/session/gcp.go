@@ -5,13 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
-	oslogin "cloud.google.com/go/oslogin/apiv1"
-	"cloud.google.com/go/oslogin/apiv1/osloginpb"
-	"cloud.google.com/go/oslogin/common/commonpb"
 	"github.com/cedws/iapc/iap"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/oauth2"
@@ -21,7 +17,6 @@ import (
 )
 
 const (
-	sshKeyLifetime                  = 15 * time.Minute
 	sshAuthenticationAttempts       = 6
 	sshAuthenticationInitialBackoff = 250 * time.Millisecond
 	sshAuthenticationMaximumBackoff = 2 * time.Second
@@ -41,7 +36,8 @@ type Identity struct {
 
 // GCPConnector establishes sessions to Compute Engine VMs using service
 // account impersonation, OS Login, and IAP tunnels, reusing impersonated
-// credentials and imported OS Login keys across targets that share them.
+// credentials and renewed OS Login key authorizations across targets that
+// share them.
 type GCPConnector struct {
 	knownHostsPath string
 	signer         ssh.Signer
@@ -68,8 +64,9 @@ func NewGCPConnector(knownHostsPath string, signer ssh.Signer) (*GCPConnector, e
 	}, nil
 }
 
-// Connect impersonates the identity, imports an OS Login key, and opens an
-// IAP tunnel carrying an authenticated SSH connection to the target.
+// Connect impersonates the identity, renews the OS Login authorization of
+// its persistent SSH key, and opens an IAP tunnel carrying an
+// authenticated SSH connection to the target.
 func (c *GCPConnector) Connect(ctx context.Context, target Target, identity Identity) (*Session, error) {
 	credentials, err := c.credentials(ctx, target.Project, identity.ServiceAccount, prepareCredentials)
 	if err != nil {
@@ -84,7 +81,7 @@ func (c *GCPConnector) Connect(ctx context.Context, target Target, identity Iden
 		func() (*compute.Instance, error) {
 			return credentials.compute.Instances.Get(target.Project, target.Zone, target.Instance).Context(ctx).Do()
 		},
-		importLoginKey,
+		authorizeLoginKey,
 	)
 	if err != nil {
 		return nil, err
@@ -103,8 +100,8 @@ func (c *GCPConnector) Connect(ctx context.Context, target Target, identity Iden
 		tokenSource := credentials.tokenSource
 		// The tunnel is dialed under establishSession's owned lifecycle so
 		// the session survives this attempt's setup context; only credentials,
-		// key import, and the Compute lookup above honor the caller context
-		// directly.
+		// key authorization, and the Compute lookup above honor the caller
+		// context directly.
 		return establishSession(ctx, func(lifeCtx context.Context) (net.Conn, error) {
 			tunnel, err := iap.Dial(lifeCtx,
 				iap.WithProject(target.Project),
@@ -160,18 +157,18 @@ type loginIdentity struct {
 	loginErr  error
 }
 
-func (identity *loginIdentity) login(ctx context.Context, signer ssh.Signer, project, serviceAccount string, importKey func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error)) error {
+func (identity *loginIdentity) login(ctx context.Context, signer ssh.Signer, project, serviceAccount string, authorize func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error)) error {
 	identity.loginOnce.Do(func() {
-		identity.username, identity.loginErr = importKey(ctx, identity.tokenSource, signer, project, serviceAccount)
+		identity.username, identity.loginErr = authorize(ctx, identity.tokenSource, signer, project, serviceAccount)
 	})
 
 	return identity.loginErr
 }
 
-func prepareTarget(ctx context.Context, identity *loginIdentity, signer ssh.Signer, project, serviceAccount string, lookup func() (*compute.Instance, error), importKey func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error)) (*compute.Instance, error) {
+func prepareTarget(ctx context.Context, identity *loginIdentity, signer ssh.Signer, project, serviceAccount string, lookup func() (*compute.Instance, error), authorize func(context.Context, oauth2.TokenSource, ssh.Signer, string, string) (string, error)) (*compute.Instance, error) {
 	loginDone := make(chan error, 1)
 	go func() {
-		loginDone <- identity.login(ctx, signer, project, serviceAccount, importKey)
+		loginDone <- identity.login(ctx, signer, project, serviceAccount, authorize)
 	}()
 	instance, instanceErr := lookup()
 	loginErr := <-loginDone
@@ -219,32 +216,4 @@ func retrySSHAuthentication(ctx context.Context, connect func() (*Session, error
 
 		backoff = min(backoff*2, sshAuthenticationMaximumBackoff)
 	}
-}
-
-func importLoginKey(ctx context.Context, tokenSource oauth2.TokenSource, signer ssh.Signer, project, user string) (string, error) {
-	loginClient, err := oslogin.NewClient(ctx, option.WithTokenSource(tokenSource))
-	if err != nil {
-		return "", fmt.Errorf("create OS Login client: %w", err)
-	}
-	defer loginClient.Close()
-
-	expires := time.Now().Add(sshKeyLifetime)
-	response, err := loginClient.ImportSshPublicKey(ctx, &osloginpb.ImportSshPublicKeyRequest{
-		Parent:    "users/" + user,
-		ProjectId: project,
-		SshPublicKey: &commonpb.SshPublicKey{
-			Key:                strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))),
-			ExpirationTimeUsec: expires.UnixMicro(),
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("import OS Login SSH key: %w", err)
-	}
-	for _, account := range response.GetLoginProfile().GetPosixAccounts() {
-		if account.GetAccountId() == project && account.GetUsername() != "" {
-			return account.GetUsername(), nil
-		}
-	}
-
-	return "", fmt.Errorf("OS Login profile has no POSIX account for %s", project)
 }

@@ -69,8 +69,10 @@ func newGCPHostProvider(controlAddress string, openSession func(context.Context,
 }
 
 // productionProvider composes the Google Cloud session stack for one command
-// run: the SSH signer, the known-hosts source, and the GCP connector
-// impersonating serviceAccount, feeding the command-owned session cache.
+// run: the persistent SSH signer, the known-hosts source, and the GCP
+// connector impersonating serviceAccount, feeding the command-owned session
+// cache. The signer's key is stored under the XDG data home, defaulting to
+// ~/.local/share, and keyed by the impersonated service account.
 func productionProvider(serviceAccount string) (commandProvider, error) {
 	if serviceAccount == "" {
 		return nil, errors.New("service account to impersonate is required")
@@ -79,7 +81,13 @@ func productionProvider(serviceAccount string) (commandProvider, error) {
 	if err != nil || home == "" {
 		return nil, fmt.Errorf("find home directory for SSH known hosts: %v", err)
 	}
-	signer, err := session.GenerateSigner()
+
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		dataHome = filepath.Join(home, ".local", "share")
+	}
+
+	signer, err := session.LoadSigner(dataHome, serviceAccount)
 	if err != nil {
 		return nil, err
 	}
