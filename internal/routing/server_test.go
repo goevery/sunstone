@@ -27,6 +27,14 @@ import (
 	"github.com/goevery/sunstone/internal/routing"
 )
 
+const testRequestTimeout = 5 * time.Second
+
+type httpResult struct {
+	status int
+	body   string
+	err    error
+}
+
 func TestAcceptsContainerInterfaceControlListener(t *testing.T) {
 	traffic := listen(t)
 	defer traffic.Close()
@@ -147,7 +155,7 @@ func TestRoutesTrafficAfterCandidateStarts(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "routes.json")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- serveServer(t, traffic, control, statePath, time.Second, ctx) }()
+	go func() { done <- serveServer(t, traffic, control, routerConfig(statePath, time.Second), ctx) }()
 	waitForHTTP(t, "http://"+control.Addr().String()+"/sunstone.sunbeam.v1.Sunbeam/GetRoute")
 
 	if status := getStatus(t, "http://"+traffic.Addr().String(), "storefront.example"); status != http.StatusNotFound {
@@ -323,7 +331,6 @@ func TestDrainingWorkloadDoesNotBlockOthers(t *testing.T) {
 	admitted := make(chan struct{})
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	defer releaseOnce.Do(func() { close(release) })
 	current := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/readyz":
@@ -337,6 +344,8 @@ func TestDrainingWorkloadDoesNotBlockOthers(t *testing.T) {
 		}
 	}))
 	defer current.Close()
+	// Release the handler before closing its server, including on assertion failure.
+	defer releaseOnce.Do(func() { close(release) })
 	replacement := readyBackend(t, "storefront-next")
 	defer replacement.Close()
 	checkout := readyBackend(t, "checkout")
@@ -346,30 +355,30 @@ func TestDrainingWorkloadDoesNotBlockOthers(t *testing.T) {
 	updateRoute(t, running.client, "routes/storefront", []string{"storefront.example"}, "container-1", current.Listener.Addr().String())
 	updateRoute(t, running.client, "routes/checkout", []string{"checkout.example"}, "container-2", checkout.Listener.Addr().String())
 
-	oldResponse := make(chan string, 1)
-	go func() { oldResponse <- getBody(t, running.traffic+"/hold", "storefront.example") }()
-	<-admitted
-
-	// The drain admits no new old-backend traffic, but the switch already
-	// happened: new requests reach the replacement, and the unrelated
-	// workload keeps serving while the drain waits.
-	updated := updateAsync(running.client, routeRequest("routes/storefront", []string{"storefront.example"}, "container-3", replacement.Listener.Addr().String()))
+	oldResponse := requestAsync(t.Context(), running.traffic+"/hold", "storefront.example")
 	select {
-	case err := <-updated:
-		t.Fatalf("update completed before drain: %v", err)
-	case <-time.After(20 * time.Millisecond):
+	case <-admitted:
+	case result := <-oldResponse:
+		t.Fatalf("request ended before admission: %+v", result)
 	}
-	// The switch is committed before the drain, so the replacement serves
-	// while the old backend still waits on its admitted request.
+
+	updated := updateAsync(running.client, routeRequest("routes/storefront", []string{"storefront.example"}, "container-3", replacement.Listener.Addr().String()))
+	// Observe the switch instead of assuming it completed after a fixed sleep.
 	waitForBody(t, running.traffic, "storefront.example", "storefront-next")
 	updateRoute(t, running.client, "routes/checkout", []string{"checkout.example"}, "container-4", checkout.Listener.Addr().String())
 	if body := getBody(t, running.traffic, "checkout.example"); body != "checkout" {
 		t.Fatalf("checkout body during foreign drain = %q", body)
 	}
+	select {
+	case err := <-updated:
+		t.Fatalf("update completed before admitted request was released: %v", err)
+	default:
+	}
 
 	releaseOnce.Do(func() { close(release) })
-	if body := <-oldResponse; body != "storefront-current" {
-		t.Fatalf("admitted response = %q", body)
+	result := <-oldResponse
+	if result.err != nil || result.status != http.StatusOK || result.body != "storefront-current" {
+		t.Fatalf("admitted response = %+v", result)
 	}
 	if err := <-updated; err != nil {
 		t.Fatal(err)
@@ -580,38 +589,43 @@ func TestFailedPersistencePreservesCurrentRoute(t *testing.T) {
 func TestRouteUpdateDrainsAdmittedRequest(t *testing.T) {
 	admitted := make(chan struct{})
 	release := make(chan struct{})
+	var releaseOnce sync.Once
 	current := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/readyz" {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		close(admitted)
-		<-release
+		if request.URL.Path == "/hold" {
+			close(admitted)
+			<-release
+		}
 		_, _ = io.WriteString(w, "current")
 	}))
 	defer current.Close()
+	defer releaseOnce.Do(func() { close(release) })
 	replacement := readyBackend(t, "replacement")
 	defer replacement.Close()
 
 	running := startRouting(t, filepath.Join(t.TempDir(), "routes.json"), time.Second)
 	updateRoute(t, running.client, "routes/storefront", []string{"storefront.example"}, "container-current", current.Listener.Addr().String())
-	oldResponse := make(chan string, 1)
-	go func() { oldResponse <- getBody(t, running.traffic+"/hold", "storefront.example") }()
-	<-admitted
+	oldResponse := requestAsync(t.Context(), running.traffic+"/hold", "storefront.example")
+	select {
+	case <-admitted:
+	case result := <-oldResponse:
+		t.Fatalf("request ended before admission: %+v", result)
+	}
 
-	updated := make(chan error, 1)
-	go func() {
-		_, err := running.client.UpdateRoute(context.Background(), connect.NewRequest(routeRequest("routes/storefront", []string{"storefront.example"}, "container-new", replacement.Listener.Addr().String())))
-		updated <- err
-	}()
+	updated := updateAsync(running.client, routeRequest("routes/storefront", []string{"storefront.example"}, "container-new", replacement.Listener.Addr().String()))
+	waitForBody(t, running.traffic, "storefront.example", "replacement")
 	select {
 	case err := <-updated:
-		t.Fatalf("update completed before drain: %v", err)
-	case <-time.After(20 * time.Millisecond):
+		t.Fatalf("update completed before admitted request was released: %v", err)
+	default:
 	}
-	close(release)
-	if body := <-oldResponse; body != "current" {
-		t.Fatalf("admitted response = %q", body)
+	releaseOnce.Do(func() { close(release) })
+	result := <-oldResponse
+	if result.err != nil || result.status != http.StatusOK || result.body != "current" {
+		t.Fatalf("admitted response = %+v", result)
 	}
 	if err := <-updated; err != nil {
 		t.Fatal(err)
@@ -637,24 +651,26 @@ func TestDrainDeadlineCancelsStuckRequest(t *testing.T) {
 	replacement := readyBackend(t, "replacement")
 	defer replacement.Close()
 
-	running := startRouting(t, filepath.Join(t.TempDir(), "routes.json"), time.Second)
+	config := routerConfig(filepath.Join(t.TempDir(), "routes.json"), time.Second)
+	config.DrainTimeout = 50 * time.Millisecond
+	running := startRoutingWithConfig(t, config)
 	updateRoute(t, running.client, "routes/storefront", []string{"storefront.example"}, "container-current", current.Listener.Addr().String())
-	requestDone := make(chan error, 1)
-	go func() {
-		if status, _ := request(t, running.traffic, "storefront.example"); status != http.StatusOK {
-			requestDone <- fmt.Errorf("stuck request was not admitted: %d", status)
-			return
-		}
-		requestDone <- nil
-	}()
-	<-admitted
+	requestDone := requestAsync(t.Context(), running.traffic, "storefront.example")
+	select {
+	case <-admitted:
+	case result := <-requestDone:
+		t.Fatalf("request ended before admission: %+v", result)
+	}
 	updateRoute(t, running.client, "routes/storefront", []string{"storefront.example"}, "container-new", replacement.Listener.Addr().String())
 	select {
 	case <-canceled:
 	case <-time.After(time.Second):
 		t.Fatal("stuck backend request was not canceled")
 	}
-	<-requestDone
+	result := <-requestDone
+	if result.err != nil || result.status != http.StatusBadGateway {
+		t.Fatalf("response after drain deadline = %+v", result)
+	}
 	if body := getBody(t, running.traffic, "storefront.example"); body != "replacement" {
 		t.Fatalf("new response = %q", body)
 	}
@@ -738,7 +754,6 @@ func TestDeleteRouteDrainsOnlyItsOwnWorkload(t *testing.T) {
 	admitted := make(chan struct{})
 	release := make(chan struct{})
 	var releaseOnce sync.Once
-	defer releaseOnce.Do(func() { close(release) })
 	draining := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
 		case "/readyz":
@@ -752,6 +767,7 @@ func TestDeleteRouteDrainsOnlyItsOwnWorkload(t *testing.T) {
 		}
 	}))
 	defer draining.Close()
+	defer releaseOnce.Do(func() { close(release) })
 	other := readyBackend(t, "checkout")
 	defer other.Close()
 
@@ -1025,7 +1041,9 @@ func routerConfig(statePath string, startupDeadline time.Duration) routing.Route
 		ProbeTimeout:    20 * time.Millisecond,
 		ProbeInterval:   5 * time.Millisecond,
 		StartupDeadline: startupDeadline,
-		DrainTimeout:    50 * time.Millisecond,
+		// Ordinary drain tests release requests explicitly; only the deadline test
+		// needs a short timeout. Allow scheduling and filesystem delays in CI.
+		DrainTimeout: 5 * time.Second,
 	}
 }
 
@@ -1061,10 +1079,10 @@ func newServer(t *testing.T, traffic, control net.Listener, statePath string, st
 
 // serveServer constructs a router and server over the given listeners and
 // runs it until ctx is canceled, returning its terminal error.
-func serveServer(t *testing.T, traffic, control net.Listener, statePath string, startupDeadline time.Duration, ctx context.Context) error {
+func serveServer(t *testing.T, traffic, control net.Listener, config routing.RouterConfig, ctx context.Context) error {
 	t.Helper()
 
-	router, err := routing.NewRouter(routerConfig(statePath, startupDeadline))
+	router, err := routing.NewRouter(config)
 	if err != nil {
 		return err
 	}
@@ -1092,16 +1110,22 @@ type runningRouting struct {
 
 func startRouting(t *testing.T, statePath string, startupDeadline time.Duration) *runningRouting {
 	t.Helper()
+
+	return startRoutingWithConfig(t, routerConfig(statePath, startupDeadline))
+}
+
+func startRoutingWithConfig(t *testing.T, config routing.RouterConfig) *runningRouting {
+	t.Helper()
 	traffic := listen(t)
 	control := listen(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- serveServer(t, traffic, control, statePath, startupDeadline, ctx) }()
+	go func() { done <- serveServer(t, traffic, control, config, ctx) }()
 	waitForHTTP(t, "http://"+control.Addr().String()+"/sunstone.sunbeam.v1.Sunbeam/GetRoute")
 	running := &runningRouting{
 		traffic:   "http://" + traffic.Addr().String(),
-		statePath: statePath,
-		client:    sunbeampbconnect.NewSunbeamClient(http.DefaultClient, "http://"+control.Addr().String()),
+		statePath: config.StatePath,
+		client:    sunbeampbconnect.NewSunbeamClient(&http.Client{Timeout: testRequestTimeout}, "http://"+control.Addr().String()),
 		cancel:    cancel,
 		done:      done,
 	}
@@ -1205,22 +1229,39 @@ func waitForBody(t *testing.T, address, authority, want string) {
 
 func request(t *testing.T, address, authority string) (int, string) {
 	t.Helper()
-	probe, err := http.NewRequest(http.MethodGet, address, nil)
+	result := fetchResponse(t.Context(), address, authority)
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+
+	return result.status, result.body
+}
+
+// requestAsync always delivers a result, including transport and response errors.
+// Assertions belong to the test goroutine so a failed request cannot strand it.
+func requestAsync(ctx context.Context, address, authority string) <-chan httpResult {
+	result := make(chan httpResult, 1)
+	go func() { result <- fetchResponse(ctx, address, authority) }()
+
+	return result
+}
+
+func fetchResponse(ctx context.Context, address, authority string) httpResult {
+	ctx, cancel := context.WithTimeout(ctx, testRequestTimeout)
+	defer cancel()
+	probe, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
-		t.Fatal(err)
+		return httpResult{err: err}
 	}
 	probe.Host = authority
 	response, err := http.DefaultClient.Do(probe)
 	if err != nil {
-		t.Fatal(err)
+		return httpResult{err: fmt.Errorf("request %s for %s: %w", address, authority, err)}
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	return response.StatusCode, string(body)
+	return httpResult{status: response.StatusCode, body: string(body), err: err}
 }
 
 // getRawStatus sends one request without any Host header.
