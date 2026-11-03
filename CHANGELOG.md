@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/goevery/sunstone/compare/v1.1.0...v1.2.0) (2026-11-03)
+
+
+### Features
+
+* support CPU shares and memory limits ([5eb884a](https://github.com/goevery/sunstone/commit/5eb884af66cfbc26e1720747d7bf548399bcd2a7))
+
 ## [1.1.0](https://github.com/goevery/sunstone/compare/v1.0.0...v1.1.0) (2026-11-03)
 
 
