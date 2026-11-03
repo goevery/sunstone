@@ -80,7 +80,7 @@ func TestWriteStatusRendersObservationsExactly(t *testing.T) {
 						"API_KEY": "projects/p/secrets/key/versions/1",
 					}},
 				}},
-				Route: &host.Route{Address: "web:8080", ContainerID: "container-1"},
+				Route: &host.Route{Hostnames: []string{"storefront.example"}, Address: "web:8080", ContainerID: "container-1"},
 			},
 		}, {
 			Target:      deployment.Target{Zone: "us-central1-b", Instance: "web-2"},
@@ -95,7 +95,7 @@ func TestWriteStatusRendersObservationsExactly(t *testing.T) {
 	want := strings.Join([]string{
 		"storefront / web-1 (us-central1-a): current",
 		"  container: container-1 name=web image=sha256:image running=true healthy=true",
-		"  route: web:8080 -> container-1",
+		"  route: storefront.example -> web:8080 (container-1)",
 		"storefront / web-2 (us-central1-b): unreachable",
 		"  error: connect: IAP unavailable",
 	}, "\n") + "\n"

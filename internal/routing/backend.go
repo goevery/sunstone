@@ -78,13 +78,21 @@ func (b *backend) serve(writer http.ResponseWriter, request *http.Request) {
 	b.proxy.ServeHTTP(writer, request.WithContext(requestCtx))
 }
 
-// drain stops new admissions, activates the successor, and waits for
-// admitted requests to finish; the timeout cancels whatever remains.
-func (b *backend) drain(timeout time.Duration, activate func()) {
+// retire stops new admissions so a successor can be published
+// atomically: a request holding this backend's pointer either acquired
+// before the publication or is rejected and retried against the
+// successor.
+func (b *backend) retire() {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.draining = true
+}
+
+// drain waits for admitted requests to finish; the timeout cancels
+// whatever remains. Admission must already be retired.
+func (b *backend) drain(timeout time.Duration) {
+	b.mu.Lock()
 	drained := b.drained
-	activate()
 	b.mu.Unlock()
 
 	timer := time.NewTimer(timeout)

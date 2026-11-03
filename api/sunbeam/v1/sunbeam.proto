@@ -14,7 +14,7 @@ option java_multiple_files = true;
 option java_outer_classname = "SunbeamProto";
 option java_package = "dev.sunstone.sunbeam.v1";
 
-// Sunbeam manages the active HTTP route on a workload VM.
+// Sunbeam manages the active HTTP routes on a workload VM.
 service Sunbeam {
   // Gets a route.
   rpc GetRoute(GetRouteRequest) returns (Route) {
@@ -44,7 +44,7 @@ service Sunbeam {
   }
 }
 
-// A catch-all HTTP route to one workload backend.
+// An HTTP route to one workload backend, matched by exact hostname.
 message Route {
   option (google.api.resource) = {
     type: "sunbeam.sunstone.dev/Route"
@@ -59,6 +59,12 @@ message Route {
 
   // The backend that receives HTTP traffic.
   Backend backend = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // The hostnames this route answers. Each hostname must be a lowercase
+  // DNS hostname without port, scheme, path, wildcard, or trailing dot;
+  // at most 100 are supported. One route owns its complete hostname set
+  // on a VM: a hostname may belong to only one route.
+  repeated string hostnames = 3 [(google.api.field_behavior) = REQUIRED];
 }
 
 // A workload backend on Sunstone's private container network.

@@ -38,6 +38,10 @@ A workload runs one container on one or more VMs. Sunstone replaces containers o
 
 For HTTP workloads, the replacement starts alongside the container serving traffic. Sunbeam switches traffic after the replacement is ready, then drains and stops the old container. Background workloads stop cleanly before their replacements start.
 
+Multiple HTTP workloads can share a VM. Sunbeam routes requests by hostname; each hostname belongs to one workload per VM. Unknown hostnames return 404.
+
+Give each workload its own load balancer health check, using its hostname in the `Host` header. Startup probes use the container address as `Host`, which the probe endpoint must accept.
+
 You provision projects, networks, IAM, VMs, and load balancers separately.
 
 ## Commands
@@ -87,11 +91,15 @@ container:
           version: latest
 
 http:
+  hostnames:
+    - storefront.example.com
   containerPort: 3000
   startupProbe:
     httpGet:
       path: /up
 ```
+
+HTTP workloads require `http.hostnames`: lowercase hostnames without ports, paths, wildcards, or trailing dots.
 
 HTTP workloads and background workloads use the same configuration format. Here is a background workload using that format.
 

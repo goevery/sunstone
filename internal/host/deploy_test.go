@@ -302,7 +302,7 @@ func TestDeployBackgroundRefusesUnclassifiableCurrentContainer(t *testing.T) {
 // repair safe: the route switches before the old container is removed.
 func TestDeployHTTPRepairsMissingMetadataBeforeRemovingPreviousContainer(t *testing.T) {
 	definition := backgroundDefinition()
-	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
 	previous := Container{ID: "old", Running: true, Healthy: true}
 	replacement := Container{ID: "new"}
 	var events []string
@@ -360,7 +360,7 @@ func TestDeployHTTPRepairsMissingMetadataBeforeRemovingPreviousContainer(t *test
 
 func TestCurrentHTTPWorkloadAndRouteAreNotReplaced(t *testing.T) {
 	definition := backgroundDefinition()
-	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
 	current := Container{ID: "current", Running: true, Healthy: true, Metadata: &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080, StartupProbePath: "/readyz"}}
 	runtime := &fakeRuntime{
 		pullFunc: func(context.Context, string) (Image, error) { return Image{ID: "image"}, nil },
@@ -372,7 +372,7 @@ func TestCurrentHTTPWorkloadAndRouteAreNotReplaced(t *testing.T) {
 			return "storefront-01234567:8080", nil
 		},
 		routeFunc: func(context.Context, string) (Route, bool, error) {
-			return Route{Workload: definition.Name, Address: "storefront-01234567:8080", ContainerID: current.ID, StartupProbePath: "/readyz"}, true, nil
+			return Route{Workload: definition.Name, Address: "storefront-01234567:8080", ContainerID: current.ID, Hostnames: definition.HTTP.Hostnames, StartupProbePath: "/readyz"}, true, nil
 		},
 	}
 
@@ -386,9 +386,48 @@ func TestCurrentHTTPWorkloadAndRouteAreNotReplaced(t *testing.T) {
 	}
 }
 
+func TestRepairsHTTPRouteWhenHostnamesDrift(t *testing.T) {
+	// The deployed container matches, but its route answers for hostnames
+	// the definition no longer claims: the route alone is repaired.
+	definition := backgroundDefinition()
+	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
+	current := Container{ID: "current", Running: true, Healthy: true, Metadata: &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}}
+	var routed Route
+	runtime := &fakeRuntime{
+		pullFunc: func(context.Context, string) (Image, error) { return Image{ID: "image"}, nil },
+		workloadContainersFunc: func(context.Context, string) ([]Container, error) {
+			return []Container{current}, nil
+		},
+		matchesFunc: func(context.Context, Container, ContainerSpec) (bool, error) { return true, nil },
+		backendAddressFunc: func(context.Context, Container, uint16) (string, error) {
+			return "storefront-01234567:8080", nil
+		},
+		routeFunc: func(context.Context, string) (Route, bool, error) {
+			return Route{Workload: definition.Name, Address: "storefront-01234567:8080", ContainerID: current.ID, Hostnames: []string{"old.example"}, StartupProbePath: "/readyz"}, true, nil
+		},
+		updateRouteFunc: func(_ context.Context, route Route) error {
+			routed = route
+
+			return nil
+		},
+	}
+
+	vm, _ := newHost(t, runtime)
+	outcome, err := vm.Deploy(t.Context(), definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outcome.Changed || outcome.Container != current.ID {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	if !routeEqual(routed, Route{Workload: definition.Name, Address: "storefront-01234567:8080", ContainerID: current.ID, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}) {
+		t.Fatalf("repaired route = %+v", routed)
+	}
+}
+
 func TestRepairsHTTPRouteWithoutReplacingCurrentContainer(t *testing.T) {
 	definition := backgroundDefinition()
-	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
 	current := Container{ID: "current", Running: true, Healthy: true, Metadata: &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080, StartupProbePath: "/readyz"}}
 	var events []string
 	runtime := &fakeRuntime{
@@ -433,7 +472,7 @@ func TestRepairsHTTPRouteWithoutReplacingCurrentContainer(t *testing.T) {
 
 func TestFailedHTTPRouteUpdateDoesNotRestartStoppedPreviousContainer(t *testing.T) {
 	definition := backgroundDefinition()
-	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
 	previous := Container{ID: "old"}
 	replacement := Container{ID: "new"}
 	var events []string
@@ -538,7 +577,7 @@ func TestDeployHTTPKeepsReplacementWhenRouteUpdateAnswerIsLost(t *testing.T) {
 	// never be drained on its account. The logs and remove functions stay
 	// unset and panic if reached.
 	definition := backgroundDefinition()
-	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
 	runtime := &fakeRuntime{
 		pullFunc: func(context.Context, string) (Image, error) {
 			return Image{ID: "sha256:image-v2"}, nil
@@ -728,7 +767,7 @@ func TestDeployHTTPKeepsReplacementOnUnclassifiableRouteFailure(t *testing.T) {
 	// final state: no logs, removal, or rollback may run. The logs and
 	// remove functions stay unset and panic if reached.
 	definition := backgroundDefinition()
-	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
 	runtime := &fakeRuntime{
 		pullFunc: func(context.Context, string) (Image, error) {
 			return Image{ID: "sha256:image-v2"}, nil
@@ -871,7 +910,7 @@ func TestDeployHTTPReplacesUnhealthyCurrentWorkload(t *testing.T) {
 		},
 	}
 	definition := backgroundDefinition()
-	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
 
 	vm, facts := newHost(t, runtime)
 	outcome, err := vm.Deploy(t.Context(), definition)
@@ -895,7 +934,7 @@ func TestDeployBackgroundRetiresRouteWhenTransitioningFromHTTP(t *testing.T) {
 	// previous container stops, and a successful transition leaves it
 	// deleted. A pure background deployment never contacts Sunbeam (the
 	// route functions stay unset there).
-	current := Container{ID: "old", Running: true, Healthy: true, Metadata: &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080}}
+	current := Container{ID: "old", Running: true, Healthy: true, Metadata: &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080, Hostnames: []string{"storefront.example"}}}
 	var events []string
 	runtime := &fakeRuntime{
 		pullFunc: func(context.Context, string) (Image, error) {
@@ -964,7 +1003,7 @@ func TestDeployBackgroundTransitionRestoresRouteAfterDefinitiveStartupFailure(t 
 	// A definitive startup failure after the route was retired rolls the
 	// previous container back and reconnects its captured route — only
 	// after the previous container starts.
-	current := Container{ID: "old", Running: true, Healthy: true, Metadata: &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080}}
+	current := Container{ID: "old", Running: true, Healthy: true, Metadata: &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080, Hostnames: []string{"storefront.example"}}}
 	var events []string
 	runtime := &fakeRuntime{
 		pullFunc: func(context.Context, string) (Image, error) {

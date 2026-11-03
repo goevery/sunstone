@@ -139,7 +139,7 @@ func TestCheckContactsSunbeamForDeployedHTTPEvenWithoutDesiredHTTP(t *testing.T)
 	routed := false
 	runtime := &fakeRuntime{
 		workloadContainersFunc: func(context.Context, string) ([]Container, error) {
-			return []Container{{ID: "web", Metadata: &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080}}}, nil
+			return []Container{{ID: "web", Metadata: &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080, Hostnames: []string{"storefront.example"}}}}, nil
 		},
 		routeFunc: func(context.Context, string) (Route, bool, error) {
 			routed = true

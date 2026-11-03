@@ -11,7 +11,7 @@ func backgroundMetadata() *DeployedMetadata {
 }
 
 func httpMetadata() *DeployedMetadata {
-	return &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080, StartupProbePath: "/readyz"}
+	return &DeployedMetadata{Kind: KindHTTP, HTTPPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
 }
 
 func TestStatusReportsMissingWorkload(t *testing.T) {

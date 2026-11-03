@@ -186,8 +186,8 @@ func TestRestartDeployedHTTPWorkloadSwitchesRouteAndRemovesPrevious(t *testing.T
 		t.Fatalf("outcome = %+v", outcome)
 	}
 	assertStrings(t, events, []string{"clone", "start-new", "backend", "route", "remove-old"})
-	wantRoute := Route{Workload: "storefront", Address: "storefront-01234567:8080", ContainerID: replacement.ID, StartupProbePath: httpMetadata().StartupProbePath}
-	if routed != wantRoute {
+	wantRoute := Route{Workload: "storefront", Address: "storefront-01234567:8080", ContainerID: replacement.ID, Hostnames: httpMetadata().Hostnames, StartupProbePath: httpMetadata().StartupProbePath}
+	if !routeEqual(routed, wantRoute) {
 		t.Fatalf("route = %+v, want %+v", routed, wantRoute)
 	}
 	assertFacts(t, facts, []Progress{{Stage: StageRestarted}})

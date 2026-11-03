@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/goevery/sunstone/internal/deployment"
 	"github.com/goevery/sunstone/internal/host"
@@ -49,7 +50,7 @@ func (f *Formatter) WriteStatus(statuses []deployment.WorkloadStatus) {
 			}
 
 			if target.Observation.Route != nil {
-				f.line("  route: %s -> %s\n", target.Observation.Route.Address, target.Observation.Route.ContainerID)
+				f.line("  route: %s -> %s (%s)\n", strings.Join(target.Observation.Route.Hostnames, ","), target.Observation.Route.Address, target.Observation.Route.ContainerID)
 			}
 
 			if target.Error != nil {

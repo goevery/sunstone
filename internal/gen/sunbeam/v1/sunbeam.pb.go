@@ -24,14 +24,19 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// A catch-all HTTP route to one workload backend.
+// An HTTP route to one workload backend, matched by exact hostname.
 type Route struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The resource name of the route.
 	// Format: routes/{route}
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// The backend that receives HTTP traffic.
-	Backend       *Backend `protobuf:"bytes,2,opt,name=backend,proto3" json:"backend,omitempty"`
+	Backend *Backend `protobuf:"bytes,2,opt,name=backend,proto3" json:"backend,omitempty"`
+	// The hostnames this route answers. Each hostname must be a lowercase
+	// DNS hostname without port, scheme, path, wildcard, or trailing dot;
+	// at most 100 are supported. One route owns its complete hostname set
+	// on a VM: a hostname may belong to only one route.
+	Hostnames     []string `protobuf:"bytes,3,rep,name=hostnames,proto3" json:"hostnames,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -76,6 +81,13 @@ func (x *Route) GetName() string {
 func (x *Route) GetBackend() *Backend {
 	if x != nil {
 		return x.Backend
+	}
+	return nil
+}
+
+func (x *Route) GetHostnames() []string {
+	if x != nil {
+		return x.Hostnames
 	}
 	return nil
 }
@@ -426,10 +438,11 @@ var File_sunbeam_v1_sunbeam_proto protoreflect.FileDescriptor
 
 const file_sunbeam_v1_sunbeam_proto_rawDesc = "" +
 	"\n" +
-	"\x18sunbeam/v1/sunbeam.proto\x12\x13sunstone.sunbeam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a google/protobuf/field_mask.proto\"\x9d\x01\n" +
+	"\x18sunbeam/v1/sunbeam.proto\x12\x13sunstone.sunbeam.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a google/protobuf/field_mask.proto\"\xc0\x01\n" +
 	"\x05Route\x12\x17\n" +
 	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12;\n" +
-	"\abackend\x18\x02 \x01(\v2\x1c.sunstone.sunbeam.v1.BackendB\x03\xe0A\x02R\abackend:>\xeaA;\n" +
+	"\abackend\x18\x02 \x01(\v2\x1c.sunstone.sunbeam.v1.BackendB\x03\xe0A\x02R\abackend\x12!\n" +
+	"\thostnames\x18\x03 \x03(\tB\x03\xe0A\x02R\thostnames:>\xeaA;\n" +
 	"\x1asunbeam.sunstone.dev/Route\x12\x0eroutes/{route}*\x06routes2\x05route\"\x83\x01\n" +
 	"\aBackend\x12\x1d\n" +
 	"\aaddress\x18\x01 \x01(\tB\x03\xe0A\x02R\aaddress\x12&\n" +

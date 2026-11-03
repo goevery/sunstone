@@ -7,7 +7,8 @@ import (
 
 func TestAcceptsManagedContainerBackendAddress(t *testing.T) {
 	route := Route{
-		Name: "routes/storefront",
+		Name:      "routes/storefront",
+		Hostnames: []string{"storefront.example"},
 		Backend: Backend{
 			Address:          "storefront-01234567:8080",
 			ContainerID:      "container-id",
@@ -21,7 +22,8 @@ func TestAcceptsManagedContainerBackendAddress(t *testing.T) {
 
 func TestRejectsUnmanagedNetworkBackendAddress(t *testing.T) {
 	route := Route{
-		Name: "routes/storefront",
+		Name:      "routes/storefront",
+		Hostnames: []string{"storefront.example"},
 		Backend: Backend{
 			Address:          "metadata.google.internal:80",
 			ContainerID:      "container-id",
@@ -63,7 +65,8 @@ func TestBackendAddressValidationBoundaries(t *testing.T) {
 	}
 	for _, test := range tests {
 		route := Route{
-			Name: "routes/storefront",
+			Name:      "routes/storefront",
+			Hostnames: []string{"storefront.example"},
 			Backend: Backend{
 				Address:          test.address,
 				ContainerID:      "container-id",

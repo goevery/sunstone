@@ -22,7 +22,7 @@ func TestStatusRendersObservationsBeforeReturningPartialFailure(t *testing.T) {
 	observed := host.Observation{
 		State:      host.StateCurrent,
 		Containers: []host.Container{{ID: "container-1", Name: "web", Image: "sha256:image", Running: true, Healthy: true}},
-		Route:      &host.Route{Address: "web:8080", ContainerID: "container-1"},
+		Route:      &host.Route{Hostnames: []string{"storefront.example"}, Address: "web:8080", ContainerID: "container-1"},
 	}
 	provider := &fakeProvider{open: func(_ context.Context, target deployment.Target, _ host.Reporter) (deployment.Handle, error) {
 		if target.Instance == "web-1" {
@@ -62,7 +62,7 @@ func TestStatusRendersObservationsBeforeReturningPartialFailure(t *testing.T) {
 	for _, expected := range []string{
 		"storefront / web-1 (us-central1-a): current",
 		"container: container-1 name=web image=sha256:image running=true healthy=true",
-		"route: web:8080 -> container-1",
+		"route: storefront.example -> web:8080 (container-1)",
 		"jobs / web-2 (us-central1-a): unreachable",
 		"error: connect: one target unavailable",
 	} {

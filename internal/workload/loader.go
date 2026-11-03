@@ -129,6 +129,9 @@ func (*Loader) Load(filename string) (Definition, error) {
 		if document.HTTP.ContainerPort < 1 || document.HTTP.ContainerPort > 65535 {
 			return Definition{}, errors.New("http.containerPort must be between 1 and 65535")
 		}
+		if err := ValidateHostnames(document.HTTP.Hostnames); err != nil {
+			return Definition{}, fmt.Errorf("http.hostnames: %w", err)
+		}
 		if document.HTTP.StartupProbe == nil || document.HTTP.StartupProbe.HTTPGet == nil {
 			return Definition{}, errors.New("http.startupProbe.httpGet.path is required")
 		}
@@ -137,7 +140,7 @@ func (*Loader) Load(filename string) (Definition, error) {
 		if err != nil || path == "" || path[0] != '/' || parsed.IsAbs() || parsed.Host != "" || parsed.Fragment != "" {
 			return Definition{}, errors.New("http.startupProbe.httpGet.path must be an origin-form absolute path")
 		}
-		httpConfig = &HTTPConfig{ContainerPort: uint16(document.HTTP.ContainerPort), StartupProbePath: path}
+		httpConfig = &HTTPConfig{ContainerPort: uint16(document.HTTP.ContainerPort), Hostnames: slices.Clone(document.HTTP.Hostnames), StartupProbePath: path}
 	}
 
 	literals, references, err := document.Container.Environment.resolve(document.GCP.Project)
@@ -186,6 +189,7 @@ type containerDocument struct {
 
 type httpDocument struct {
 	ContainerPort int                   `yaml:"containerPort"`
+	Hostnames     []string              `yaml:"hostnames"`
 	StartupProbe  *startupProbeDocument `yaml:"startupProbe"`
 }
 

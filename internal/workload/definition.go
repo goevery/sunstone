@@ -31,8 +31,12 @@ type ContainerConfig struct {
 	SecretEnvironment map[string]string
 }
 
-// HTTPConfig selects HTTP deployment and describes its startup gate.
+// HTTPConfig selects HTTP deployment and describes its hostname routing
+// and startup gate.
 type HTTPConfig struct {
-	ContainerPort    uint16
+	ContainerPort uint16
+	// Hostnames is the complete set of DNS hostnames the workload answers
+	// for through Sunbeam on each target VM.
+	Hostnames        []string
 	StartupProbePath string
 }

@@ -260,7 +260,8 @@ func (h *DockerRuntime) Route(ctx context.Context, workload string) (Route, bool
 func (h *DockerRuntime) UpdateRoute(ctx context.Context, route Route) error {
 	_, err := h.routes.UpdateRoute(ctx, connect.NewRequest(&sunbeampb.UpdateRouteRequest{
 		Route: &sunbeampb.Route{
-			Name: "routes/" + route.Workload,
+			Name:      "routes/" + route.Workload,
+			Hostnames: slices.Clone(route.Hostnames),
 			Backend: &sunbeampb.Backend{
 				Address:          route.Address,
 				ContainerId:      route.ContainerID,
@@ -306,6 +307,7 @@ func routeFromProto(route *sunbeampb.Route) Route {
 		Workload:         strings.TrimPrefix(route.GetName(), "routes/"),
 		Address:          route.GetBackend().GetAddress(),
 		ContainerID:      route.GetBackend().GetContainerId(),
+		Hostnames:        slices.Clone(route.GetHostnames()),
 		StartupProbePath: route.GetBackend().GetStartupProbePath(),
 	}
 }
@@ -446,6 +448,9 @@ func containerLabels(spec ContainerSpec) map[string]string {
 		labels[KindLabel] = KindHTTP
 		labels[HTTPPortLabel] = strconv.FormatUint(uint64(spec.HTTP.ContainerPort), 10)
 		labels[HTTPProbePathLabel] = spec.HTTP.StartupProbePath
+		// A hostname set is always JSON-encodable: the loader validates it.
+		hostnames, _ := json.Marshal(spec.HTTP.Hostnames)
+		labels[HTTPHostnamesLabel] = string(hostnames)
 	}
 
 	if len(spec.SecretEnvironment) != 0 {
@@ -472,7 +477,9 @@ func metadataMatches(labels map[string]string, desired ContainerSpec) bool {
 		return false
 	}
 	if desired.HTTP != nil &&
-		(metadata.HTTPPort != desired.HTTP.ContainerPort || metadata.StartupProbePath != desired.HTTP.StartupProbePath) {
+		(metadata.HTTPPort != desired.HTTP.ContainerPort ||
+			metadata.StartupProbePath != desired.HTTP.StartupProbePath ||
+			!slices.Equal(metadata.Hostnames, desired.HTTP.Hostnames)) {
 		return false
 	}
 

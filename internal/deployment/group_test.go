@@ -186,7 +186,7 @@ func TestDeployPassesDesiredHTTPFromDefinition(t *testing.T) {
 	}
 
 	httpDefinition := storefrontDefinition()
-	httpDefinition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	httpDefinition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
 	if _, err := group.Deploy(t.Context(), httpDefinition); err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +649,7 @@ func TestStatusCollectsAllTargetsBestEffort(t *testing.T) {
 	observed := host.Observation{
 		State:      host.StateCurrent,
 		Containers: []host.Container{{ID: "container-1", Name: "web", Image: "sha256:image", Running: true, Healthy: true}},
-		Route:      &host.Route{Address: "web:8080", ContainerID: "container-1"},
+		Route:      &host.Route{Hostnames: []string{"storefront.example"}, Address: "web:8080", ContainerID: "container-1"},
 	}
 	observeFailure := errors.New("route lookup failed")
 	// The status hosts set no check function: status never preflights and
@@ -715,7 +715,7 @@ func TestStatusKeepsObservationWhenOnlyCloseFails(t *testing.T) {
 	observed := host.Observation{
 		State:      host.StateCurrent,
 		Containers: []host.Container{{ID: "container-1", Running: true, Healthy: true}},
-		Route:      &host.Route{Address: "web:8080", ContainerID: "container-1"},
+		Route:      &host.Route{Hostnames: []string{"storefront.example"}, Address: "web:8080", ContainerID: "container-1"},
 	}
 	provider := &stubProvider{open: func(context.Context, Target, host.Reporter) (Handle, error) {
 		return Handle{

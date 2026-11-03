@@ -3,6 +3,7 @@ package routing
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"connectrpc.com/connect"
 	sunbeampb "github.com/goevery/sunstone/internal/gen/sunbeam/v1"
@@ -32,13 +33,13 @@ func (h *controlHandler) GetRoute(_ context.Context, request *connect.Request[su
 	return connect.NewResponse(routeToProto(route)), nil
 }
 
-// ListRoutes lists the configured route.
+// ListRoutes lists one page of routes.
 func (h *controlHandler) ListRoutes(_ context.Context, request *connect.Request[sunbeampb.ListRoutesRequest]) (*connect.Response[sunbeampb.ListRoutesResponse], error) {
-	routes, err := h.router.ListRoutes(request.Msg.GetPageSize(), request.Msg.GetPageToken())
+	routes, nextToken, err := h.router.ListRoutes(request.Msg.GetPageSize(), request.Msg.GetPageToken())
 	if err != nil {
 		return nil, connectError(err)
 	}
-	response := &sunbeampb.ListRoutesResponse{Routes: make([]*sunbeampb.Route, len(routes))}
+	response := &sunbeampb.ListRoutesResponse{Routes: make([]*sunbeampb.Route, len(routes)), NextPageToken: nextToken}
 	for index, route := range routes {
 		response.Routes[index] = routeToProto(route)
 	}
@@ -77,7 +78,8 @@ func routeFromProto(route *sunbeampb.Route) Route {
 	}
 
 	return Route{
-		Name: route.GetName(),
+		Name:      route.GetName(),
+		Hostnames: slices.Clone(route.GetHostnames()),
 		Backend: Backend{
 			Address:          route.GetBackend().GetAddress(),
 			ContainerID:      route.GetBackend().GetContainerId(),
@@ -88,7 +90,8 @@ func routeFromProto(route *sunbeampb.Route) Route {
 
 func routeToProto(route Route) *sunbeampb.Route {
 	return &sunbeampb.Route{
-		Name: route.Name,
+		Name:      route.Name,
+		Hostnames: slices.Clone(route.Hostnames),
 		Backend: &sunbeampb.Backend{
 			Address:          route.Backend.Address,
 			ContainerId:      route.Backend.ContainerID,

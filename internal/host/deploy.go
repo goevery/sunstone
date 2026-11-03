@@ -240,12 +240,12 @@ func (h *Host) deployHTTP(ctx context.Context, definition workload.Definition, s
 			if err != nil {
 				return Result{}, fmt.Errorf("find current HTTP backend: %w", err)
 			}
-			desiredRoute := Route{Workload: definition.Name, Address: address, ContainerID: current.ID, StartupProbePath: definition.HTTP.StartupProbePath}
+			desiredRoute := Route{Workload: definition.Name, Address: address, ContainerID: current.ID, Hostnames: definition.HTTP.Hostnames, StartupProbePath: definition.HTTP.StartupProbePath}
 			activeRoute, found, err := h.runtime.Route(ctx, definition.Name)
 			if err != nil {
 				return Result{}, fmt.Errorf("get current route: %w", err)
 			}
-			if found && activeRoute == desiredRoute {
+			if found && routeEqual(activeRoute, desiredRoute) {
 				h.report(Progress{Stage: StageCurrent})
 
 				return Result{Container: current.ID}, nil
@@ -276,7 +276,7 @@ func (h *Host) deployHTTP(ctx context.Context, definition workload.Definition, s
 	if err != nil {
 		return Result{}, h.replacementFailure(ctx, replacement, nil, nil, "find HTTP backend", err)
 	}
-	route := Route{Workload: definition.Name, Address: address, ContainerID: replacement.ID, StartupProbePath: definition.HTTP.StartupProbePath}
+	route := Route{Workload: definition.Name, Address: address, ContainerID: replacement.ID, Hostnames: definition.HTTP.Hostnames, StartupProbePath: definition.HTTP.StartupProbePath}
 	h.report(Progress{Stage: StageRouting})
 	if err := h.runtime.UpdateRoute(ctx, route); err != nil {
 		return Result{}, h.replacementFailure(ctx, replacement, nil, nil, "update route", err)

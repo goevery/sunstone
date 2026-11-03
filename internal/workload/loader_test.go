@@ -1,8 +1,10 @@
 package workload_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -157,6 +159,8 @@ container:
   image: example/storefront
 http:
   containerPort: 8080
+  hostnames:
+    - storefront.example.com
   startupProbe:
     httpGet:
       path: /readyz
@@ -166,19 +170,60 @@ http:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if definition.HTTP == nil || definition.HTTP.ContainerPort != 8080 || definition.HTTP.StartupProbePath != "/readyz" {
+	if definition.HTTP == nil || definition.HTTP.ContainerPort != 8080 ||
+		!slices.Equal(definition.HTTP.Hostnames, []string{"storefront.example.com"}) ||
+		definition.HTTP.StartupProbePath != "/readyz" {
 		t.Fatalf("HTTP configuration = %+v", definition.HTTP)
 	}
 }
 
 func TestRejectsInvalidHTTPConfiguration(t *testing.T) {
 	tests := map[string]string{
-		"missing port": `startupProbe: {httpGet: {path: /readyz}}`,
-		"invalid port": `containerPort: 70000
+		"missing port": `hostnames: [storefront.example.com]
   startupProbe: {httpGet: {path: /readyz}}`,
-		"missing probe": `containerPort: 8080`,
+		"invalid port": `containerPort: 70000
+  hostnames: [storefront.example.com]
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"missing probe": `containerPort: 8080
+  hostnames: [storefront.example.com]`,
 		"invalid path": `containerPort: 8080
+  hostnames: [storefront.example.com]
   startupProbe: {httpGet: {path: readyz}}`,
+		"missing hostnames": `containerPort: 8080
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"empty hostnames": `containerPort: 8080
+  hostnames: []
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"empty hostname": `containerPort: 8080
+  hostnames: [""]
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"uppercase hostname": `containerPort: 8080
+  hostnames: [Storefront.Example.com]
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"trailing dot": `containerPort: 8080
+  hostnames: [storefront.example.com.]
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"hostname port": `containerPort: 8080
+  hostnames: [storefront.example.com:80]
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"hostname url": `containerPort: 8080
+  hostnames: [https://storefront.example.com]
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"hostname path": `containerPort: 8080
+  hostnames: [storefront.example.com/app]
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"wildcard hostname": `containerPort: 8080
+  hostnames: [*.example.com]
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"duplicate hostnames": `containerPort: 8080
+  hostnames: [storefront.example.com, storefront.example.com]
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"overlong hostname": `containerPort: 8080
+  hostnames: [` + strings.Repeat("a", 254) + `]
+  startupProbe: {httpGet: {path: /readyz}}`,
+		"overlong label": `containerPort: 8080
+  hostnames: [` + strings.Repeat("a", 64) + `.com]
+  startupProbe: {httpGet: {path: /readyz}}`,
 	}
 	for name, httpConfig := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -198,6 +243,50 @@ http:
 	}
 }
 
+func TestRejectsMoreThanOneHundredHostnames(t *testing.T) {
+	hostnames := make([]string, 101)
+	for index := range hostnames {
+		hostnames[index] = fmt.Sprintf("app-%d.example.com", index)
+	}
+	config := fmt.Sprintf(`name: storefront
+gcp:
+  project: acme-prod
+  instances: [{zone: us-central1-a, name: web-1}]
+container:
+  image: example/storefront
+http:
+  containerPort: 8080
+  hostnames: ["%s"]
+  startupProbe: {httpGet: {path: /readyz}}
+`, strings.Join(hostnames, `", "`))
+
+	if _, err := workload.NewLoader().Load(writeConfig(t, config)); err == nil {
+		t.Fatal("expected more than one hundred hostnames to be rejected")
+	}
+}
+
+func TestAcceptsValidHostnames(t *testing.T) {
+	config := `name: storefront
+gcp:
+  project: acme-prod
+  instances: [{zone: us-central1-a, name: web-1}]
+container:
+  image: example/storefront
+http:
+  containerPort: 8080
+  hostnames: [app.example.com, api.example.com, storefront]
+  startupProbe: {httpGet: {path: /readyz}}
+`
+
+	definition, err := workload.NewLoader().Load(writeConfig(t, config))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(definition.HTTP.Hostnames, []string{"app.example.com", "api.example.com", "storefront"}) {
+		t.Fatalf("hostnames = %v", definition.HTTP.Hostnames)
+	}
+}
+
 func TestLoadsHTTPWorkloadWithMultipleInstancesInSourceOrder(t *testing.T) {
 	filename := writeConfig(t, `
 name: storefront
@@ -210,6 +299,7 @@ container:
   image: example/storefront
 http:
   containerPort: 8080
+  hostnames: [storefront.example.com]
   startupProbe:
     httpGet: {path: /readyz}
 `)

@@ -12,14 +12,14 @@ import (
 // stateVersion is the durable route state format version.
 const stateVersion = 1
 
-// stateDocument is the JSON shape persisted for one route.
+// stateDocument is the JSON shape persisted for the route table.
 type stateDocument struct {
-	Version int   `json:"version"`
-	Route   Route `json:"route"`
+	Version int     `json:"version"`
+	Routes  []Route `json:"routes"`
 }
 
-// loadState restores the persisted route; a missing state file yields nil.
-func loadState(path string) (*Route, error) {
+// loadState restores the persisted routes; a missing state file yields nil.
+func loadState(path string) ([]Route, error) {
 	file, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -43,26 +43,12 @@ func loadState(path string) (*Route, error) {
 		return nil, fmt.Errorf("unsupported routing state version %d", document.Version)
 	}
 
-	return &document.Route, nil
+	return document.Routes, nil
 }
 
-// removeState durably deletes the persisted route.
-func removeState(path string) error {
-	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	directory, err := os.Open(filepath.Dir(path))
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-
-	return directory.Sync()
-}
-
-// persistState atomically replaces the persisted route, syncing the file
-// and its directory before the rename becomes visible.
-func persistState(path string, route Route) error {
+// persistState atomically replaces the persisted route table, syncing the
+// file and its directory before the rename becomes visible.
+func persistState(path string, routes []Route) error {
 	directory := filepath.Dir(path)
 	temporary, err := os.CreateTemp(directory, ".sunbeam-state-*")
 	if err != nil {
@@ -71,7 +57,7 @@ func persistState(path string, route Route) error {
 	temporaryPath := temporary.Name()
 	defer os.Remove(temporaryPath)
 	encoder := json.NewEncoder(temporary)
-	if err := encoder.Encode(stateDocument{Version: stateVersion, Route: route}); err != nil {
+	if err := encoder.Encode(stateDocument{Version: stateVersion, Routes: routes}); err != nil {
 		temporary.Close()
 
 		return err

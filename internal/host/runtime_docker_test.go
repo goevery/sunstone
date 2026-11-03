@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -391,7 +392,7 @@ func TestBackgroundMetadataLabels(t *testing.T) {
 func TestHTTPMetadataLabels(t *testing.T) {
 	labels := containerLabels(ContainerSpec{
 		Workload:          "storefront",
-		HTTP:              &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"},
+		HTTP:              &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"},
 		SecretEnvironment: map[string]string{"API_KEY": "projects/p/secrets/key/versions/latest"},
 	})
 	if labels[ManagedLabel] != "true" || labels[WorkloadLabel] != "storefront" {
@@ -399,6 +400,10 @@ func TestHTTPMetadataLabels(t *testing.T) {
 	}
 	if labels[KindLabel] != KindHTTP || labels[HTTPPortLabel] != "8080" || labels[HTTPProbePathLabel] != "/readyz" {
 		t.Fatalf("HTTP labels = %v", labels)
+	}
+	var hostnames []string
+	if err := json.Unmarshal([]byte(labels[HTTPHostnamesLabel]), &hostnames); err != nil || !slices.Equal(hostnames, []string{"storefront.example"}) {
+		t.Fatalf("hostnames label = %q (%v)", labels[HTTPHostnamesLabel], err)
 	}
 	var references map[string]string
 	if err := json.Unmarshal([]byte(labels[SecretEnvironmentLabel]), &references); err != nil {
@@ -418,7 +423,7 @@ func TestMetadataMatchesCurrentConfiguration(t *testing.T) {
 		Workload:          "storefront",
 		Image:             Image{ID: "sha256:image"},
 		RestartPolicy:     "unless-stopped",
-		HTTP:              &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"},
+		HTTP:              &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"},
 		SecretEnvironment: map[string]string{"API_KEY": "projects/p/secrets/key/versions/1"},
 	}
 	if !metadataMatches(containerLabels(desired), desired) {
@@ -443,7 +448,7 @@ func TestMetadataMatchRequiresAgreedMetadata(t *testing.T) {
 	httpSpec := ContainerSpec{
 		Workload:      "storefront",
 		RestartPolicy: "unless-stopped",
-		HTTP:          &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"},
+		HTTP:          &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"},
 	}
 	legacy := map[string]string{ManagedLabel: "true", WorkloadLabel: "jobs"}
 	legacyHashed := map[string]string{ManagedLabel: "true", WorkloadLabel: "jobs", "dev.sunstone.configuration": "a567ec426a494c90501fe4577041ae3bf2dedcd84e11371e52d720bf00f463b4"}
@@ -458,9 +463,13 @@ func TestMetadataMatchRequiresAgreedMetadata(t *testing.T) {
 		{name: "missing managed", labels: map[string]string{WorkloadLabel: "jobs", KindLabel: KindBackground}, desired: background},
 		{name: "unknown kind", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "jobs", KindLabel: "cron"}, desired: background},
 		{name: "background with HTTP fields", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "jobs", KindLabel: KindBackground, HTTPPortLabel: "8080"}, desired: background},
-		{name: "http without port", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "storefront", KindLabel: KindHTTP, HTTPProbePathLabel: "/readyz"}, desired: httpSpec},
-		{name: "http without probe", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "storefront", KindLabel: KindHTTP, HTTPPortLabel: "8080"}, desired: httpSpec},
-		{name: "http with zero port", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "storefront", KindLabel: KindHTTP, HTTPPortLabel: "0", HTTPProbePathLabel: "/readyz"}, desired: httpSpec},
+		{name: "http without port", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "storefront", KindLabel: KindHTTP, HTTPHostnamesLabel: `["storefront.example"]`, HTTPProbePathLabel: "/readyz"}, desired: httpSpec},
+		{name: "http without probe", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "storefront", KindLabel: KindHTTP, HTTPPortLabel: "8080", HTTPHostnamesLabel: `["storefront.example"]`}, desired: httpSpec},
+		{name: "http with zero port", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "storefront", KindLabel: KindHTTP, HTTPPortLabel: "0", HTTPHostnamesLabel: `["storefront.example"]`, HTTPProbePathLabel: "/readyz"}, desired: httpSpec},
+		{name: "http without hostnames", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "storefront", KindLabel: KindHTTP, HTTPPortLabel: "8080", HTTPProbePathLabel: "/readyz"}, desired: httpSpec},
+		{name: "http with malformed hostnames", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "storefront", KindLabel: KindHTTP, HTTPPortLabel: "8080", HTTPHostnamesLabel: "{not-json", HTTPProbePathLabel: "/readyz"}, desired: httpSpec},
+		{name: "http with invalid hostnames", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "storefront", KindLabel: KindHTTP, HTTPPortLabel: "8080", HTTPHostnamesLabel: `["Storefront.Example"]`, HTTPProbePathLabel: "/readyz"}, desired: httpSpec},
+		{name: "background with hostname label", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "jobs", KindLabel: KindBackground, HTTPHostnamesLabel: `["storefront.example"]`}, desired: background},
 		{name: "malformed secret references", labels: map[string]string{ManagedLabel: "true", WorkloadLabel: "jobs", KindLabel: KindBackground, SecretEnvironmentLabel: "{not-json"}, desired: background},
 	}
 	for _, test := range tests {
@@ -481,7 +490,7 @@ func TestMetadataMatchDetectsConfigurationDrift(t *testing.T) {
 	httpSpec := ContainerSpec{
 		Workload:          "storefront",
 		RestartPolicy:     "unless-stopped",
-		HTTP:              &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"},
+		HTTP:              &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"},
 		SecretEnvironment: map[string]string{"API_KEY": "projects/p/secrets/key/versions/1"},
 	}
 	tests := []struct {
@@ -493,6 +502,7 @@ func TestMetadataMatchDetectsConfigurationDrift(t *testing.T) {
 		{name: "kind", labels: containerLabels(base), desired: httpSpec},
 		{name: "http port", labels: containerLabels(httpSpec), desired: withHTTPPort(httpSpec, 9090)},
 		{name: "probe path", labels: containerLabels(httpSpec), desired: withHTTPProbe(httpSpec, "/healthz")},
+		{name: "hostnames", labels: containerLabels(httpSpec), desired: withHTTPHostnames(httpSpec, []string{"other.example"})},
 		{name: "secret reference", labels: containerLabels(base), desired: withSecretRef(base, "API_KEY", "projects/p/secrets/key/versions/2")},
 		{name: "added secret reference", labels: containerLabels(base), desired: withAddedSecretRef(base, "DATABASE", "projects/p/secrets/db/versions/1")},
 		{name: "removed secret reference", labels: containerLabels(withAddedSecretRef(base, "DATABASE", "projects/p/secrets/db/versions/1")), desired: base},
@@ -584,7 +594,7 @@ func TestMatchesDetectsRuntimeConfigurationDrift(t *testing.T) {
 func TestMatchesRequiresHTTPNetworkAttachment(t *testing.T) {
 	f := newSecretHost(t)
 	spec := secretSpec()
-	spec.HTTP = &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"}
+	spec.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"}
 	candidate, err := f.host.Create(t.Context(), spec)
 	if err != nil {
 		t.Fatal(err)
@@ -611,7 +621,7 @@ func TestMatchesRequiresHTTPNetworkAttachment(t *testing.T) {
 func TestWorkloadContainersDecodesDeployedMetadataFromListLabels(t *testing.T) {
 	httpSpec := ContainerSpec{
 		Workload: "storefront",
-		HTTP:     &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"},
+		HTTP:     &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"},
 		SecretEnvironment: map[string]string{
 			"API_KEY": "projects/p/secrets/key/versions/latest",
 		},
@@ -659,6 +669,7 @@ func TestWorkloadContainersDecodesDeployedMetadataFromListLabels(t *testing.T) {
 	}
 	if httpContainer.Metadata == nil || httpContainer.Metadata.Kind != KindHTTP ||
 		httpContainer.Metadata.HTTPPort != 8080 || httpContainer.Metadata.StartupProbePath != "/readyz" ||
+		!slices.Equal(httpContainer.Metadata.Hostnames, []string{"storefront.example"}) ||
 		httpContainer.Metadata.SecretEnvironment["API_KEY"] != "projects/p/secrets/key/versions/latest" {
 		t.Fatalf("HTTP metadata = %+v", httpContainer.Metadata)
 	}
@@ -692,6 +703,12 @@ func withHTTPPort(spec ContainerSpec, port uint16) ContainerSpec {
 
 func withHTTPProbe(spec ContainerSpec, path string) ContainerSpec {
 	spec.HTTP.StartupProbePath = path
+
+	return spec
+}
+
+func withHTTPHostnames(spec ContainerSpec, hostnames []string) ContainerSpec {
+	spec.HTTP.Hostnames = hostnames
 
 	return spec
 }

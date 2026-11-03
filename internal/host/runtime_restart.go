@@ -47,7 +47,7 @@ func (h *DockerRuntime) RestartReplacement(ctx context.Context, current Containe
 		SecretEnvironment: metadata.SecretEnvironment,
 	}
 	if metadata.Kind == KindHTTP {
-		spec.HTTP = &workload.HTTPConfig{ContainerPort: metadata.HTTPPort, StartupProbePath: metadata.StartupProbePath}
+		spec.HTTP = &workload.HTTPConfig{ContainerPort: metadata.HTTPPort, Hostnames: metadata.Hostnames, StartupProbePath: metadata.StartupProbePath}
 	}
 
 	suffix := make([]byte, containerNameRandomBytes)

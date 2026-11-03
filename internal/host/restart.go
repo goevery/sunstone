@@ -85,7 +85,7 @@ func (h *Host) restartHTTP(ctx context.Context, workloadName string, current Con
 		return Result{}, h.replacementFailure(ctx, replacement, nil, nil, "find HTTP backend", err)
 	}
 
-	route := Route{Workload: workloadName, Address: address, ContainerID: replacement.ID, StartupProbePath: current.Metadata.StartupProbePath}
+	route := Route{Workload: workloadName, Address: address, ContainerID: replacement.ID, Hostnames: current.Metadata.Hostnames, StartupProbePath: current.Metadata.StartupProbePath}
 	if err := h.runtime.UpdateRoute(ctx, route); err != nil {
 		return Result{}, h.replacementFailure(ctx, replacement, nil, nil, "update route", err)
 	}

@@ -208,6 +208,6 @@ func restartHTTPSpec() ContainerSpec {
 		Environment:       map[string]string{"LITERAL": "keep"},
 		SecretEnvironment: map[string]string{"API_KEY": "projects/p/secrets/key/versions/latest"},
 		RestartPolicy:     "unless-stopped",
-		HTTP:              &workload.HTTPConfig{ContainerPort: 8080, StartupProbePath: "/readyz"},
+		HTTP:              &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"storefront.example"}, StartupProbePath: "/readyz"},
 	}
 }

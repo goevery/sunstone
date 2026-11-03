@@ -3,6 +3,8 @@ package host
 import (
 	"encoding/json"
 	"strconv"
+
+	"github.com/goevery/sunstone/internal/workload"
 )
 
 // Deployed metadata labels record the configuration a managed container was
@@ -12,6 +14,7 @@ const (
 	WorkloadLabel          = "dev.sunstone.workload"
 	KindLabel              = "dev.sunstone.kind"
 	HTTPPortLabel          = "dev.sunstone.http.port"
+	HTTPHostnamesLabel     = "dev.sunstone.http.hostnames"
 	HTTPProbePathLabel     = "dev.sunstone.http.startup-probe-path"
 	SecretEnvironmentLabel = "dev.sunstone.secret-env"
 )
@@ -27,6 +30,7 @@ const (
 type DeployedMetadata struct {
 	Kind              string
 	HTTPPort          uint16
+	Hostnames         []string
 	StartupProbePath  string
 	SecretEnvironment map[string]string
 }
@@ -45,7 +49,7 @@ func DecodeMetadata(labels map[string]string) (DeployedMetadata, bool) {
 	}
 
 	metadata := DeployedMetadata{Kind: kind}
-	hasHTTPFields := labels[HTTPPortLabel] != "" || labels[HTTPProbePathLabel] != ""
+	hasHTTPFields := labels[HTTPPortLabel] != "" || labels[HTTPHostnamesLabel] != "" || labels[HTTPProbePathLabel] != ""
 	if kind == KindHTTP {
 		port, err := strconv.ParseUint(labels[HTTPPortLabel], 10, 16)
 		if err != nil || port == 0 || labels[HTTPProbePathLabel] == "" {
@@ -53,6 +57,14 @@ func DecodeMetadata(labels map[string]string) (DeployedMetadata, bool) {
 		}
 		metadata.HTTPPort = uint16(port)
 		metadata.StartupProbePath = labels[HTTPProbePathLabel]
+		var hostnames []string
+		if raw := labels[HTTPHostnamesLabel]; raw == "" || json.Unmarshal([]byte(raw), &hostnames) != nil {
+			return DeployedMetadata{}, false
+		}
+		if workload.ValidateHostnames(hostnames) != nil {
+			return DeployedMetadata{}, false
+		}
+		metadata.Hostnames = hostnames
 	} else if hasHTTPFields {
 		return DeployedMetadata{}, false
 	}

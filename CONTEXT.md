@@ -13,8 +13,12 @@ A workload that does not receive HTTP traffic through Sunbeam and whose replacem
 _Avoid_: Worker, job
 
 **HTTP workload**:
-A workload whose HTTP traffic is managed by Sunbeam so a ready replacement can receive traffic before the previous container is drained.
+A workload whose HTTP traffic is managed by Sunbeam, routed by its hostnames, so a ready replacement can receive traffic before the previous container is drained.
 _Avoid_: Web service
+
+**Hostname**:
+A DNS name an HTTP workload answers for through Sunbeam on a VM. One workload owns its complete hostname set on a VM; the same hostname may be routed on other VMs.
+_Avoid_: Domain, virtual host
 
 **Deployment**:
 An attempt to make a workload definition current on its target VMs, replacing containers one VM at a time.

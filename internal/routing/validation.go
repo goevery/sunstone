@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/goevery/sunstone/internal/workload"
 )
 
 var (
@@ -15,11 +17,14 @@ var (
 	backendNamePattern = regexp.MustCompile(`^[a-z]([a-z0-9-]{0,52}[a-z0-9])?-[a-f0-9]{8}$`)
 )
 
-// validateRoute accepts only routes that name a managed container backend
-// and an origin-form startup probe path.
+// validateRoute accepts only routes that name a managed container backend,
+// a complete hostname set, and an origin-form startup probe path.
 func validateRoute(route Route) error {
 	if err := validateRouteName(route.Name); err != nil {
 		return err
+	}
+	if err := workload.ValidateHostnames(route.Hostnames); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidArgument, err)
 	}
 	if route.Backend.ContainerID == "" {
 		return fmt.Errorf("%w: backend address, container_id, and startup_probe_path are required", ErrInvalidArgument)
@@ -36,6 +41,14 @@ func validateRoute(route Route) error {
 	}
 
 	return nil
+}
+
+// routeEqual reports whether two routes answer for the same hostnames
+// through the same backend.
+func routeEqual(left, right Route) bool {
+	return left.Name == right.Name &&
+		slices.Equal(left.Hostnames, right.Hostnames) &&
+		left.Backend == right.Backend
 }
 
 // validateRouteName requires the routes/{route} resource format.
@@ -62,6 +75,8 @@ func applyUpdateMask(current *Route, requested Route, paths []string) Route {
 			result.Backend.ContainerID = requested.Backend.ContainerID
 		case "backend.startup_probe_path":
 			result.Backend.StartupProbePath = requested.Backend.StartupProbePath
+		case "hostnames":
+			result.Hostnames = slices.Clone(requested.Hostnames)
 		}
 	}
 
@@ -71,7 +86,7 @@ func applyUpdateMask(current *Route, requested Route, paths []string) Route {
 // validateMask accepts only supported update_mask paths.
 func validateMask(paths []string) error {
 	for _, path := range paths {
-		if !slices.Contains([]string{"*", "backend", "backend.address", "backend.container_id", "backend.startup_probe_path"}, path) {
+		if !slices.Contains([]string{"*", "backend", "backend.address", "backend.container_id", "backend.startup_probe_path", "hostnames"}, path) {
 			return fmt.Errorf("%w: unsupported update_mask path %q", ErrInvalidArgument, path)
 		}
 	}
