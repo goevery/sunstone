@@ -157,6 +157,31 @@ func TestRestartReplacementPreservesDeployedRestartPolicy(t *testing.T) {
 	}
 }
 
+func TestRestartReplacementPreservesDeployedResources(t *testing.T) {
+	f := newSecretHost(t)
+	spec := restartHTTPSpec()
+	spec.Resources = workload.Resources{CPUShares: 1024, MemoryLimit: 536870912}
+	current, err := f.host.Create(t.Context(), spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Inspection, not the original definition, is authoritative for restart.
+	f.inspectCPUShares.Store(2048)
+	f.inspectMemory.Store(268435456)
+	f.inspectMemorySwap.Store(-1)
+	if _, err := f.host.RestartReplacement(t.Context(), current); err != nil {
+		t.Fatal(err)
+	}
+
+	f.mu.Lock()
+	created := f.createdRaw[len(f.createdRaw)-1]
+	f.mu.Unlock()
+	config := created["HostConfig"].(map[string]any)
+	if config["CpuShares"] != float64(2048) || config["Memory"] != float64(268435456) || config["MemorySwap"] != float64(-1) {
+		t.Fatalf("cloned Docker resources = %+v", config)
+	}
+}
+
 func TestRestartReplacementMissingLocalImageFailsExplicitly(t *testing.T) {
 	f := newSecretHost(t)
 	candidate, err := f.host.Create(t.Context(), restartHTTPSpec())

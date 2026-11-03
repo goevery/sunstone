@@ -98,6 +98,7 @@ type ContainerSpec struct {
 	Environment       map[string]string
 	SecretEnvironment map[string]string
 	RestartPolicy     string
+	Resources         workload.Resources
 	HTTP              *workload.HTTPConfig
 }
 

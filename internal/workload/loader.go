@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/docker/go-units"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -143,6 +145,11 @@ func (*Loader) Load(filename string) (Definition, error) {
 		httpConfig = &HTTPConfig{ContainerPort: uint16(document.HTTP.ContainerPort), Hostnames: slices.Clone(document.HTTP.Hostnames), StartupProbePath: path}
 	}
 
+	resources, err := document.Container.Resources.resolve()
+	if err != nil {
+		return Definition{}, err
+	}
+
 	literals, references, err := document.Container.Environment.resolve(document.GCP.Project)
 	if err != nil {
 		return Definition{}, err
@@ -159,6 +166,7 @@ func (*Loader) Load(filename string) (Definition, error) {
 			Command:           document.Container.Command,
 			Environment:       literals,
 			SecretEnvironment: references,
+			Resources:         resources,
 		},
 		HTTP: httpConfig,
 	}, nil
@@ -185,6 +193,17 @@ type containerDocument struct {
 	Image       string            `yaml:"image"`
 	Command     []string          `yaml:"command"`
 	Environment strictEnvironment `yaml:"env"`
+	Resources   resourcesDocument `yaml:"resources"`
+}
+
+type resourcesDocument struct {
+	CPU struct {
+		// Preserve the tag: YAML's integer decoder truncates floats.
+		Shares yaml.Node `yaml:"shares"`
+	} `yaml:"cpu"`
+	Memory struct {
+		Limit *string `yaml:"limit"`
+	} `yaml:"memory"`
 }
 
 type httpDocument struct {
@@ -209,6 +228,29 @@ type environmentEntry struct {
 }
 
 type strictEnvironment []environmentEntry
+
+// resolve validates explicit resource settings and converts memory sizes to bytes.
+func (resources resourcesDocument) resolve() (Resources, error) {
+	var result Resources
+	if node := resources.CPU.Shares; node.Kind != 0 && node.Tag != "!!null" {
+		var shares int64
+		if node.Tag != "!!int" || node.Decode(&shares) != nil || shares < 2 || shares > 262144 {
+			return Resources{}, errors.New("container.resources.cpu.shares must be an integer between 2 and 262144")
+		}
+		result.CPUShares = shares
+	}
+	if resources.Memory.Limit != nil {
+		limit, err := units.RAMInBytes(*resources.Memory.Limit)
+		// go-units converts through float64. Out-of-range conversion can
+		// saturate at MaxInt64 on some architectures instead of becoming negative.
+		if err != nil || limit < 6*units.MiB || limit == math.MaxInt64 {
+			return Resources{}, errors.New("container.resources.memory.limit must be a valid memory size of at least 6MiB")
+		}
+		result.MemoryLimit = limit
+	}
+
+	return result, nil
+}
 
 func (environment *strictEnvironment) UnmarshalYAML(node *yaml.Node) error {
 	var entries strictEnvironment

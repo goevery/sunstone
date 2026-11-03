@@ -88,6 +88,7 @@ func (h *Host) Deploy(ctx context.Context, definition workload.Definition) (Resu
 		Environment:       definition.Container.Environment,
 		SecretEnvironment: definition.Container.SecretEnvironment,
 		RestartPolicy:     restartPolicy,
+		Resources:         definition.Container.Resources,
 		HTTP:              definition.HTTP,
 	}
 

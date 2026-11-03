@@ -127,6 +127,73 @@ func TestNewDockerRuntimeRequiresControlAddress(t *testing.T) {
 	}
 }
 
+func TestCreateAppliesContainerResources(t *testing.T) {
+	for _, httpWorkload := range []bool{false, true} {
+		t.Run(fmt.Sprintf("http=%t", httpWorkload), func(t *testing.T) {
+			f := newSecretHost(t)
+			spec := secretSpec()
+			if httpWorkload {
+				spec = restartHTTPSpec()
+			}
+			spec.Resources = workload.Resources{CPUShares: 1024, MemoryLimit: 536870912}
+			if _, err := f.host.Create(t.Context(), spec); err != nil {
+				t.Fatal(err)
+			}
+
+			f.mu.Lock()
+			created := f.createdRaw[len(f.createdRaw)-1]
+			f.mu.Unlock()
+			config := created["HostConfig"].(map[string]any)
+			if config["CpuShares"] != float64(1024) || config["Memory"] != float64(536870912) {
+				t.Fatalf("Docker resources = %+v", config)
+			}
+			if config["NanoCpus"] != float64(0) || config["CpuQuota"] != float64(0) {
+				t.Fatalf("CPU shares unexpectedly configured a hard quota: %+v", config)
+			}
+		})
+	}
+}
+
+func TestMatchesDetectsResourceChanges(t *testing.T) {
+	deployed := workload.Resources{CPUShares: 1024, MemoryLimit: 536870912}
+	tests := []struct {
+		name    string
+		actual  workload.Resources
+		desired workload.Resources
+		matches bool
+	}{
+		{name: "unchanged", actual: deployed, desired: deployed, matches: true},
+		{name: "cpu changed", actual: deployed, desired: workload.Resources{CPUShares: 2048, MemoryLimit: 536870912}},
+		{name: "memory changed", actual: deployed, desired: workload.Resources{CPUShares: 1024, MemoryLimit: 268435456}},
+		{name: "cpu removed", actual: deployed, desired: workload.Resources{MemoryLimit: 536870912}},
+		{name: "memory removed", actual: deployed, desired: workload.Resources{CPUShares: 1024}},
+		{name: "limits added", desired: deployed},
+		{name: "defaults unchanged", matches: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			f := newSecretHost(t)
+			spec := secretSpec()
+			spec.Resources = test.actual
+			current, err := f.host.Create(t.Context(), spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.inspectCPUShares.Store(test.actual.CPUShares)
+			f.inspectMemory.Store(test.actual.MemoryLimit)
+			spec.Resources = test.desired
+
+			matches, err := f.host.Matches(t.Context(), current, spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if matches != test.matches {
+				t.Fatalf("Matches = %t, want %t", matches, test.matches)
+			}
+		})
+	}
+}
+
 func TestHTTPContainerJoinsSunstoneNetworkWithoutHostPort(t *testing.T) {
 	options := containerCreateOptions(ContainerSpec{
 		HTTP: &workload.HTTPConfig{ContainerPort: 8080},

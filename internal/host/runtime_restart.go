@@ -15,8 +15,8 @@ import (
 // RestartReplacement creates a uniquely named, stopped replacement for the
 // deployed container current, cloned from its actual Docker inspection: the
 // same resolved image ID, effective command and resolved environment, the
-// deployed restart policy, and the deployed HTTP networking and metadata
-// labels. It never pulls images or resolves secrets; a missing local image
+// deployed restart policy and resources, HTTP networking, and metadata labels.
+// It never pulls images or resolves secrets; a missing local image
 // fails explicitly. Deployed secret values are enrolled for diagnostic
 // redaction without any fetch.
 func (h *DockerRuntime) RestartReplacement(ctx context.Context, current Container) (Container, error) {
@@ -40,7 +40,7 @@ func (h *DockerRuntime) RestartReplacement(ctx context.Context, current Containe
 
 	// Rebuild the deployed metadata labels from the decoded provenance; swap
 	// in the resolved image ID, actual command, resolved environment, and the
-	// full inspected restart policy.
+	// full inspected restart policy and resource settings.
 	spec := ContainerSpec{
 		Workload:          config.Labels[WorkloadLabel],
 		RestartPolicy:     string(hostConfig.RestartPolicy.Name),
@@ -60,6 +60,7 @@ func (h *DockerRuntime) RestartReplacement(ctx context.Context, current Containe
 	options.Config.Cmd = slices.Clone(config.Cmd)
 	options.Config.Env = slices.Clone(config.Env)
 	options.HostConfig.RestartPolicy = hostConfig.RestartPolicy
+	options.HostConfig.Resources = hostConfig.Resources
 
 	created, err := h.docker.ContainerCreate(ctx, options)
 	if err != nil {

@@ -66,6 +66,84 @@ container:
 	}
 }
 
+func TestLoadsContainerResources(t *testing.T) {
+	filename := writeConfig(t, `
+name: jobs
+gcp:
+  project: acme-prod
+  instances: [{zone: us-central1-a, name: vm-1}]
+container:
+  image: example/jobs
+  resources:
+    cpu:
+      shares: 1024
+    memory:
+      limit: 512MiB
+`)
+	definition, err := workload.NewLoader().Load(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if definition.Container.Resources.CPUShares != 1024 || definition.Container.Resources.MemoryLimit != 536870912 {
+		t.Fatalf("resources = %+v", definition.Container.Resources)
+	}
+}
+
+func TestContainerResourceSettings(t *testing.T) {
+	tests := []struct {
+		name      string
+		resources string
+		shares    int64
+		memory    int64
+		invalid   bool
+	}{
+		{name: "omitted"},
+		{name: "empty", resources: "resources: {}"},
+		{name: "cpu only", resources: "resources: {cpu: {shares: 2}}", shares: 2},
+		{name: "maximum cpu", resources: "resources: {cpu: {shares: 262144}}", shares: 262144},
+		{name: "memory only", resources: "resources: {memory: {limit: 1GiB}}", memory: 1073741824},
+		{name: "fractional memory unit", resources: "resources: {memory: {limit: 1.5GiB}}", memory: 1610612736},
+		{name: "minimum memory", resources: "resources: {memory: {limit: 6MiB}}", memory: 6291456},
+		{name: "memory bytes", resources: "resources: {memory: {limit: 6291456}}", memory: 6291456},
+		{name: "zero cpu", resources: "resources: {cpu: {shares: 0}}", invalid: true},
+		{name: "negative cpu", resources: "resources: {cpu: {shares: -1}}", invalid: true},
+		{name: "cpu below minimum", resources: "resources: {cpu: {shares: 1}}", invalid: true},
+		{name: "cpu above maximum", resources: "resources: {cpu: {shares: 262145}}", invalid: true},
+		{name: "fractional cpu", resources: "resources: {cpu: {shares: 1024.5}}", invalid: true},
+		{name: "cpu overflow", resources: "resources: {cpu: {shares: 9223372036854775808}}", invalid: true},
+		{name: "empty memory", resources: `resources: {memory: {limit: ""}}`, invalid: true},
+		{name: "zero memory", resources: "resources: {memory: {limit: 0}}", invalid: true},
+		{name: "negative memory", resources: "resources: {memory: {limit: -1MiB}}", invalid: true},
+		{name: "memory below minimum", resources: "resources: {memory: {limit: 6291455}}", invalid: true},
+		{name: "unknown memory unit", resources: "resources: {memory: {limit: 512watts}}", invalid: true},
+		{name: "memory overflow", resources: "resources: {memory: {limit: 999999999999999999999PiB}}", invalid: true},
+		{name: "unknown resource", resources: "resources: {cpus: 1}", invalid: true},
+		{name: "unknown cpu field", resources: "resources: {cpu: {limit: 1}}", invalid: true},
+		{name: "unknown memory field", resources: "resources: {memory: {reservation: 512MiB}}", invalid: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, http := range []string{"", "\nhttp:\n  containerPort: 8080\n  hostnames: [app.example.com]\n  startupProbe: {httpGet: {path: /readyz}}\n"} {
+				config := "name: app\ngcp:\n  project: acme-prod\n  instances: [{zone: us-central1-a, name: vm-1}]\ncontainer:\n  image: example/app\n  " + test.resources + "\n" + http
+				definition, err := workload.NewLoader().Load(writeConfig(t, config))
+				if test.invalid {
+					if err == nil {
+						t.Fatalf("accepted invalid resources: %s", test.resources)
+					}
+
+					continue
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if definition.Container.Resources.CPUShares != test.shares || definition.Container.Resources.MemoryLimit != test.memory {
+					t.Fatalf("resources = %+v; want shares %d, memory %d", definition.Container.Resources, test.shares, test.memory)
+				}
+			}
+		})
+	}
+}
+
 func TestLoadsMultipleInstancesInSourceOrder(t *testing.T) {
 	filename := writeConfig(t, `
 name: storefront-jobs

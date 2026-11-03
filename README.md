@@ -90,6 +90,12 @@ container:
           name: projects/acme-prod/secrets/database-url
           version: latest
 
+  resources:
+    cpu:
+      shares: 1024
+    memory:
+      limit: 512MiB
+
 http:
   hostnames:
     - storefront.example.com
@@ -100,6 +106,8 @@ http:
 ```
 
 HTTP workloads require `http.hostnames`: lowercase hostnames without ports, paths, wildcards, or trailing dots.
+
+CPU shares (`2–262144`) set relative priority under load, not a cap. Memory limits cap RAM (minimum `6MiB`). Both are optional; omitting them uses Docker defaults, with no memory limit. Deploy applies changes; restart keeps deployed settings. HTTP deployments need room for both old and new containers.
 
 HTTP workloads and background workloads use the same configuration format. Here is a background workload using that format.
 

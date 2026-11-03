@@ -400,6 +400,9 @@ type secretHostFixture struct {
 	inspectCmd                atomic.Value
 	inspectRestart            atomic.Value
 	inspectRetries            atomic.Int64
+	inspectCPUShares          atomic.Int64
+	inspectMemory             atomic.Int64
+	inspectMemorySwap         atomic.Int64
 	inspectNetwork            atomic.Bool
 	failure                   atomic.Int64
 	corrupt                   atomic.Bool
@@ -637,10 +640,15 @@ func newSecretHost(t *testing.T) *secretHostFixture {
 			}
 
 			inspected := map[string]any{
-				"Id":         "candidate",
-				"Image":      f.inspectImage.Load(),
-				"Config":     map[string]any{"Image": f.inspectConfigImage.Load().(string), "Env": environment, "Labels": f.created.Config.Labels},
-				"HostConfig": map[string]any{"RestartPolicy": restartPolicy},
+				"Id":     "candidate",
+				"Image":  f.inspectImage.Load(),
+				"Config": map[string]any{"Image": f.inspectConfigImage.Load().(string), "Env": environment, "Labels": f.created.Config.Labels},
+				"HostConfig": map[string]any{
+					"RestartPolicy": restartPolicy,
+					"CpuShares":     f.inspectCPUShares.Load(),
+					"Memory":        f.inspectMemory.Load(),
+					"MemorySwap":    f.inspectMemorySwap.Load(),
+				},
 			}
 			if cmd, ok := f.inspectCmd.Load().([]string); ok {
 				inspected["Config"].(map[string]any)["Cmd"] = cmd

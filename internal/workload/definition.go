@@ -29,6 +29,14 @@ type ContainerConfig struct {
 	Environment map[string]string
 	// SecretEnvironment contains normalized version references, never payloads.
 	SecretEnvironment map[string]string
+	Resources         Resources
+}
+
+// Resources controls a container's CPU weight and hard memory limit.
+// Zero values leave the corresponding Docker settings unset.
+type Resources struct {
+	CPUShares   int64
+	MemoryLimit int64 // Bytes.
 }
 
 // HTTPConfig selects HTTP deployment and describes its hostname routing

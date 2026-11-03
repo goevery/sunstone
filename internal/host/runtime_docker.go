@@ -208,6 +208,8 @@ func (h *DockerRuntime) Matches(ctx context.Context, current Container, desired 
 		slices.Equal(inspected.Container.Config.Cmd, expectedCommand) &&
 		maps.Equal(actualEnvironment, expectedEnvironment) &&
 		string(inspected.Container.HostConfig.RestartPolicy.Name) == desired.RestartPolicy &&
+		inspected.Container.HostConfig.CPUShares == desired.Resources.CPUShares &&
+		inspected.Container.HostConfig.Memory == desired.Resources.MemoryLimit &&
 		metadataMatches(inspected.Container.Config.Labels, desired), nil
 }
 
@@ -410,6 +412,10 @@ func containerCreateOptions(spec ContainerSpec, name string) client.ContainerCre
 	}
 	hostConfig := &container.HostConfig{
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyMode(spec.RestartPolicy)},
+		Resources: container.Resources{
+			CPUShares: spec.Resources.CPUShares,
+			Memory:    spec.Resources.MemoryLimit,
+		},
 	}
 	var networkingConfig *network.NetworkingConfig
 	if spec.HTTP != nil {

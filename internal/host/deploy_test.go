@@ -43,6 +43,54 @@ func TestNewHostAcceptsExplicitCollaborators(t *testing.T) {
 	}
 }
 
+func TestDeployPassesResourcesToRuntime(t *testing.T) {
+	for _, httpWorkload := range []bool{false, true} {
+		t.Run(fmt.Sprintf("http=%t", httpWorkload), func(t *testing.T) {
+			definition := backgroundDefinition()
+			definition.Container.Resources = workload.Resources{CPUShares: 2048, MemoryLimit: 268435456}
+			if httpWorkload {
+				definition.HTTP = &workload.HTTPConfig{ContainerPort: 8080, Hostnames: []string{"app.example.com"}, StartupProbePath: "/readyz"}
+			}
+			assertResources := func(spec ContainerSpec) {
+				t.Helper()
+				if spec.Resources.CPUShares != 2048 || spec.Resources.MemoryLimit != 268435456 {
+					t.Fatalf("container resources = %+v", spec.Resources)
+				}
+			}
+			runtime := &fakeRuntime{
+				pullFunc: func(context.Context, string) (Image, error) { return Image{ID: "image"}, nil },
+				workloadContainersFunc: func(context.Context, string) ([]Container, error) {
+					return []Container{{ID: "old", Running: true, Metadata: &DeployedMetadata{Kind: KindBackground}}}, nil
+				},
+				matchesFunc: func(_ context.Context, _ Container, spec ContainerSpec) (bool, error) {
+					assertResources(spec)
+
+					return false, nil
+				},
+				createFunc: func(_ context.Context, spec ContainerSpec) (Container, error) {
+					assertResources(spec)
+
+					return Container{ID: "new"}, nil
+				},
+				startFunc:          func(context.Context, Container) error { return nil },
+				stopFunc:           func(context.Context, Container) error { return nil },
+				verifyFunc:         func(context.Context, Container) error { return nil },
+				removeFunc:         func(context.Context, Container) error { return nil },
+				backendAddressFunc: func(context.Context, Container, uint16) (string, error) { return "new:8080", nil },
+				updateRouteFunc:    func(context.Context, Route) error { return nil },
+			}
+			vm, _ := newHost(t, runtime)
+			result, err := vm.Deploy(t.Context(), definition)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.Changed || result.Container != "new" {
+				t.Fatalf("deployment result = %+v", result)
+			}
+		})
+	}
+}
+
 func TestCurrentBackgroundWorkloadIsNotReplaced(t *testing.T) {
 	current := Container{ID: "current", Name: "storefront-jobs", Running: true, Healthy: true, Metadata: &DeployedMetadata{Kind: KindBackground}}
 	runtime := &fakeRuntime{
